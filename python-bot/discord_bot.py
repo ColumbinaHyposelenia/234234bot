@@ -198,7 +198,9 @@ async def cmd_verify_log(interaction: discord.Interaction, user: discord.Member)
     log_id = f"{guild_id}_{user.id}"
     
     try:
-        db = firestore.client()
+        app = firebase_admin.get_app()
+        from google.cloud import firestore as google_firestore
+        db = google_firestore.Client(project=app.project_id, credentials=app.credential.get_credential(), database="ai-studio-dc522c60-c5c4-49c5-9c61-c2d2c3ba7a1b")
         doc_ref = db.collection('verificationLogs').document(log_id)
         doc = doc_ref.get()
         
@@ -250,6 +252,64 @@ async def cmd_verify_log(interaction: discord.Interaction, user: discord.Member)
     except Exception as e:
         print(f"인증로그 확인 중 오류: {e}")
         await interaction.response.send_message("❌ 인증 로그를 불러오는 중 오류가 발생했습니다.", ephemeral=True)
+
+@bot_func.tree.command(name="유저역할", description="인증 완료 후 역할을 지급받습니다.")
+async def cmd_get_role(interaction: discord.Interaction):
+    guild_id = str(interaction.guild_id)
+    user_id = str(interaction.user.id)
+    log_id = f"{guild_id}_{user_id}"
+
+    try:
+        app = firebase_admin.get_app()
+        from google.cloud import firestore as google_firestore
+        db = google_firestore.Client(project=app.project_id, credentials=app.credential.get_credential(), database="ai-studio-dc522c60-c5c4-49c5-9c61-c2d2c3ba7a1b")
+        
+        # 1. 인증 기록 확인
+        log_doc = db.collection('verificationLogs').document(log_id).get()
+        if not log_doc.exists:
+            await interaction.response.send_message("❌ 웹사이트 인증 기록이 없습니다. `/인증` 명령어를 통해 먼저 인증해 주세요.", ephemeral=True)
+            return
+            
+        # 2. 서버 설정에서 역할 ID 확인
+        config_doc = db.collection('serverConfigs').document(guild_id).get()
+        if not config_doc.exists:
+            await interaction.response.send_message("❌ 이 서버에 대한 설정 내역이 없습니다.", ephemeral=True)
+            return
+            
+        config_data = config_doc.to_dict()
+        role_id_str = config_data.get('verifiedRoleId')
+        if not role_id_str:
+            await interaction.response.send_message("❌ 이 서버에는 인증 완료 시 지급될 역할이 설정되어 있지 않습니다.", ephemeral=True)
+            return
+            
+        # 3. 디스코드에서 역할 객체 찾기
+        try:
+            role_id = int(role_id_str)
+        except ValueError:
+            await interaction.response.send_message("❌ 서버 설정에 등록된 역할 ID가 올바르지 않습니다. 관리자에게 문의하세요.", ephemeral=True)
+            return
+
+        role = interaction.guild.get_role(role_id)
+        if not role:
+            await interaction.response.send_message("❌ 해당 역할을 디스코드 서버에서 찾을 수 없습니다. 관리자에게 문의하세요.", ephemeral=True)
+            return
+            
+        # 4. 역할 부여
+        if role in interaction.user.roles:
+            await interaction.response.send_message("✅ 이미 해당 역할이 부여되어 있습니다.", ephemeral=True)
+            return
+
+        try:
+            await interaction.user.add_roles(role)
+            await interaction.response.send_message(f"🎉 인증 기록이 확인되어 `{role.name}` 역할이 성공적으로 지급되었습니다!", ephemeral=True)
+        except discord.Forbidden:
+            await interaction.response.send_message("❌ 역할을 부여할 권한이 없습니다. 봇의 역할 위치가 지급할 역할보다 위에 있는지 확인해 주세요.", ephemeral=True)
+        except Exception as e:
+            await interaction.response.send_message(f"❌ 역할 부여 중 알 수 없는 오류가 발생했습니다: {e}", ephemeral=True)
+            
+    except Exception as e:
+        print(f"역할 지급 중 오류 발생: {e}")
+        await interaction.response.send_message("❌ 역할 지급 처리 중 내부 시스템 오류가 발생했습니다.", ephemeral=True)
 
 # --- 5. 동시 실행 설정 ---
 async def main():
