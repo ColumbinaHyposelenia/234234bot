@@ -16,7 +16,7 @@ service cloud.firestore {
              data.guildId is string && data.guildId.size() <= 128 &&
              data.createdAt is number &&
              data.updatedAt is number &&
-             (!data.keys().hasAny(['verifiedRoleId']) || (data.verifiedRoleId is string && data.verifiedRoleId.size() <= 128));
+             (!data.keys().hasAny(['verifiedRoleIds']) || (data.verifiedRoleIds is list && data.verifiedRoleIds.size() <= 20 && (data.verifiedRoleIds.size() == 0 || data.verifiedRoleIds[0] is string)));
     }
     
     function isValidVerificationLog(data) {
@@ -47,7 +47,7 @@ service cloud.firestore {
                      incoming().createdAt == existing().createdAt &&
                      incoming().updatedAt >= request.time.toMillis() - 60000 &&
                      incoming().updatedAt <= request.time.toMillis() + 60000 &&
-                     incoming().diff(existing()).affectedKeys().hasOnly(['updatedAt', 'verifiedRoleId']);
+                     incoming().diff(existing()).affectedKeys().hasOnly(['updatedAt', 'verifiedRoleIds']);
       allow delete: if isSignedIn() && existing().adminUid == request.auth.uid;
     }
 
