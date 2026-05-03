@@ -385,8 +385,9 @@ async def cmd_verify_log(interaction: discord.Interaction, user: discord.Member)
         print(f"인증로그 확인 중 오류: {e}")
         await interaction.response.send_message("❌ 인증 로그를 불러오는 중 오류가 발생했습니다.", ephemeral=True)
 
-@bot_func.tree.command(name="역할설정", description="인증 완료 후 역할을 지급받습니다.")
-async def cmd_get_role(interaction: discord.Interaction):
+@bot_func.tree.command(name="지급역할", description="인증 완료 후 관리자가 설정한 역할을 지급받습니다.")
+@app_commands.describe(role="지급받을 역할을 선택하세요 (비어있을 경우 설정된 모든 역할을 시도합니다)")
+async def cmd_grant_role(interaction: discord.Interaction, role: discord.Role = None):
     guild_id = str(interaction.guild_id)
     user_id = str(interaction.user.id)
     log_id = f"{guild_id}_{user_id}"
@@ -405,43 +406,66 @@ async def cmd_get_role(interaction: discord.Interaction):
         # 2. 서버 설정에서 역할 ID 목록 확인
         config_doc = db.collection('serverConfigs').document(guild_id).get()
         if not config_doc.exists:
-            await interaction.response.send_message("❌ 이 서버에 대한 설정 내역이 없습니다.", ephemeral=True)
+            await interaction.response.send_message("❌ 이 서버에 대한 설정 내역이 없습니다. 관리자 대시보드에서 설정을 완료해 주세요.", ephemeral=True)
             return
             
         config_data = config_doc.to_dict()
         role_ids_str = config_data.get('verifiedRoleIds', [])
         if not role_ids_str:
-            await interaction.response.send_message("❌ 이 서버에는 인증 완료 시 지급될 역할이 설정되어 있지 않습니다.", ephemeral=True)
+            await interaction.response.send_message("❌ 이 서버에는 인증 완료 시 지급될 역할이 설정되어 있지 않습니다. 대시보드에서 역할을 선택해 주세요.", ephemeral=True)
             return
             
-        # 3. 디스코드에서 역할 객체 찾기
+        # 3. 지급할 역할 필터링
+        allowed_role_ids = [str(rid) for rid in role_ids_str]
+        
         roles_to_add = []
-        for role_id_str in role_ids_str:
-            try:
-                role_id = int(role_id_str)
-                role = interaction.guild.get_role(role_id)
-                if role:
-                    roles_to_add.append(role)
-            except Exception:
-                continue
+        if role:
+            if str(role.id) in allowed_role_ids:
+                roles_to_add.append(role)
+            else:
+                await interaction.response.send_message(f"❌ `{role.name}` 역할은 지급 가능한 역할 목록에 없습니다. 관리자가 설정한 역할만 지급받을 수 있습니다.", ephemeral=True)
+                return
+        else:
+            # 매개변수가 없으면 설정된 모든 역할을 대상으로 함
+            for role_id_str in allowed_role_ids:
+                try:
+                    r = interaction.guild.get_role(int(role_id_str))
+                    if r:
+                        roles_to_add.append(r)
+                except:
+                    continue
 
         if not roles_to_add:
-            await interaction.response.send_message("❌ 설정된 역할들을 디스코드 서버에서 찾을 수 없습니다. 관리자에게 문의하세요.", ephemeral=True)
+            await interaction.response.send_message("❌ 지급할 수 있는 역할을 찾을 수 없습니다. (역할이 삭제되었거나 설정 오류)", ephemeral=True)
             return
             
         # 4. 역할 부여 (이미 있는 역할 제외)
         new_roles = [r for r in roles_to_add if r not in interaction.user.roles]
         
         if not new_roles:
-            await interaction.response.send_message("✅ 이미 모든 역할이 부여되어 있습니다.", ephemeral=True)
+            await interaction.response.send_message("✅ 이미 필요한 역할이 모두 부여되어 있습니다.", ephemeral=True)
             return
 
         try:
+            # 봇 자신의 역할 위치 확인을 위해 봇 멤버 정보를 가져옵니다.
+            bot_member = interaction.guild.get_member(bot_func.user.id)
+            if not bot_member:
+                bot_member = await interaction.guild.fetch_member(bot_func.user.id)
+            
+            bot_top_role = bot_member.top_role
+            
+            # 봇보다 높은 역할이 있는지 확인
+            unassignable = [r for r in new_roles if r.position >= bot_top_role.position]
+            if unassignable:
+                unassignable_names = ", ".join([f"`{r.name}`" for r in unassignable])
+                await interaction.response.send_message(f"❌ 봇의 권한이 부족하여 다음 역할을 지급할 수 없습니다: {unassignable_names}\n디스코드 서버 설정에서 봇의 순서를 지급할 역할보다 위로 올려주세요.", ephemeral=True)
+                return
+
             await interaction.user.add_roles(*new_roles)
             role_names = ", ".join([f"`{r.name}`" for r in new_roles])
             await interaction.response.send_message(f"🎉 인증 기록이 확인되어 {role_names} 역할이 성공적으로 지급되었습니다!", ephemeral=True)
         except discord.Forbidden:
-            await interaction.response.send_message("❌ 역할을 부여할 권한이 없습니다. 봇의 역할 위치가 지급할 역할보다 위에 있는지 확인해 주세요.", ephemeral=True)
+            await interaction.response.send_message("❌ 역할을 부여할 권한이 없습니다. 봇에게 '역할 관리' 권한이 있는지 확인해 주세요.", ephemeral=True)
         except Exception as e:
             await interaction.response.send_message(f"❌ 역할 부여 중 알 수 없는 오류가 발생했습니다: {e}", ephemeral=True)
             
