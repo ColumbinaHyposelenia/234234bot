@@ -4,19 +4,9 @@ import { createServer as createViteServer } from "vite";
 import path from "path";
 import cors from "cors";
 
-// Discord API call to fetch roles
+// Removed discord fetch as it's not needed by frontend anymore
 async function getGuildRoles(guildId: string) {
-  const token = process.env.DISCORD_FUNC_TOKEN;
-  if (!token) throw new Error("DISCORD_FUNC_TOKEN is missing");
-  const res = await fetch(`https://discord.com/api/v10/guilds/${guildId}/roles`, {
-    headers: {
-      Authorization: `Bot ${token}`,
-    },
-  });
-  if (!res.ok) {
-    throw new Error(`Failed to fetch roles: ${res.statusText}`);
-  }
-  return res.json();
+    return [];
 }
 
 async function startServer() {
@@ -35,7 +25,7 @@ async function startServer() {
     try {
       const roles = await getGuildRoles(req.params.guildId);
       // Filter out @everyone role and managed roles if you want
-      const filteredRoles = roles
+      const filteredRoles = Array.isArray(roles) ? roles
         .filter((r: any) => r.name !== "@everyone" && !r.managed)
         .map((r: any) => ({
           id: r.id,
@@ -43,11 +33,11 @@ async function startServer() {
           color: r.color,
           position: r.position
         }))
-        .sort((a: any, b: any) => b.position - a.position);
+        .sort((a: any, b: any) => b.position - a.position) : [];
       res.json(filteredRoles);
     } catch (e: any) {
-      console.error(e);
-      res.status(500).json({ error: e.message });
+      console.error("Discord fetching err:", e.message);
+      res.status(400).json({ error: e.message });
     }
   });
 
