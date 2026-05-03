@@ -15,19 +15,24 @@ function RoleSelector({ serverId, selectedRoleIds, onChange }: { serverId: strin
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    fetch(`/api/roles/${serverId}`)
-      .then(res => {
-        if(!res.ok) throw new Error("Failed to load roles");
-        return res.json();
-      })
-      .then(data => {
-        setRoles(data);
-        setLoading(false);
-      })
-      .catch(e => {
-        setError(e.message);
-        setLoading(false);
-      });
+    import('firebase/firestore').then(({ doc, getDoc }) => {
+      const roleDocRef = doc(db, 'serverRoles', serverId);
+      getDoc(roleDocRef)
+        .then(roleDoc => {
+          if (roleDoc.exists()) {
+            setRoles(roleDoc.data().roles || []);
+          } else {
+            console.log("No roles found in Firebase. Please run /역할동기화 in your Discord server.");
+            setError("이 서버의 역할 정보가 없습니다. 디스코드에서 봇의 '/역할동기화' 명령어를 실행한 후 새로고침해주세요.");
+          }
+          setLoading(false);
+        })
+        .catch(e => {
+          console.error(e);
+          setError(e.message);
+          setLoading(false);
+        });
+    });
   }, [serverId]);
 
   if (loading) return <div className="text-xs text-gray-500">역할을 불러오는 중...</div>;
