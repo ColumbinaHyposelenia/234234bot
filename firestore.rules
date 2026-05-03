@@ -37,14 +37,16 @@ service cloud.firestore {
                     isValidId(guildId) &&
                     isValidServerConfig(incoming()) &&
                     incoming().adminUid == request.auth.uid &&
-                    incoming().createdAt == request.time.toMillis() &&
-                    incoming().updatedAt == request.time.toMillis();
+                    incoming().createdAt >= request.time.toMillis() - 60000 &&
+                    incoming().createdAt <= request.time.toMillis() + 60000 &&
+                    incoming().updatedAt == incoming().createdAt;
       allow update: if isSignedIn() &&
                      existing().adminUid == request.auth.uid &&
                      isValidServerConfig(incoming()) &&
                      incoming().adminUid == existing().adminUid &&
                      incoming().createdAt == existing().createdAt &&
-                     incoming().updatedAt == request.time.toMillis() &&
+                     incoming().updatedAt >= request.time.toMillis() - 60000 &&
+                     incoming().updatedAt <= request.time.toMillis() + 60000 &&
                      incoming().diff(existing()).affectedKeys().hasOnly(['updatedAt']);
       allow delete: if isSignedIn() && existing().adminUid == request.auth.uid;
     }
@@ -56,7 +58,8 @@ service cloud.firestore {
                     isValidVerificationLog(incoming()) && 
                     logId == incoming().guildId + '_' + incoming().userId &&
                     exists(/databases/$(database)/documents/serverConfigs/$(incoming().guildId)) &&
-                    incoming().verifiedAt == request.time.toMillis();
+                    incoming().verifiedAt >= request.time.toMillis() - 60000 &&
+                    incoming().verifiedAt <= request.time.toMillis() + 60000;
       // logs are immutable
       allow update, delete: if false;
     }
