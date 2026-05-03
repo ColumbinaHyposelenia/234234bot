@@ -95,6 +95,7 @@ export default function AdminDashboard() {
               verifiedRoleIds: []
             });
             window.history.replaceState({}, document.title, "/");
+            await loadData(u.uid); // Ensure data is loaded immediately
           } catch (e: any) {
             handleFirestoreError(e, OperationType.CREATE, `serverConfigs/${setupGuildId}`);
           }
@@ -188,7 +189,8 @@ export default function AdminDashboard() {
         adminUid: user.uid,
         guildId: newGuildId,
         createdAt: Date.now(),
-        updatedAt: Date.now()
+        updatedAt: Date.now(),
+        verifiedRoleIds: []
       });
       setNewGuildId('');
       loadData(user.uid);
@@ -266,14 +268,20 @@ export default function AdminDashboard() {
                         serverId={s.guildId}
                         selectedRoleIds={s.verifiedRoleIds || []}
                         onChange={async (newRoleIds) => {
+                          const oldServers = [...servers];
+                          // Optimistic update
+                          setServers(servers.map(server => 
+                            server.id === s.id ? { ...server, verifiedRoleIds: newRoleIds } : server
+                          ));
+                          
                           try {
-                            const { updateDoc } = await import('firebase/firestore');
+                            const { updateDoc, doc } = await import('firebase/firestore');
                             await updateDoc(doc(db, 'serverConfigs', s.id), { 
                               verifiedRoleIds: newRoleIds,
                               updatedAt: Date.now()
                             });
-                            loadData(user.uid);
                           } catch(err: any) {
+                            setServers(oldServers); // Rollback
                             handleFirestoreError(err, OperationType.UPDATE, `serverConfigs/${s.id}`);
                           }
                         }}
