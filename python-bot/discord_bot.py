@@ -216,7 +216,7 @@ class SetupView(discord.ui.View):
         )
         
         verify_view = discord.ui.View(timeout=None)
-        verify_btn = discord.ui.Button(label="인증하러 가기", style=discord.ButtonStyle.link, url=verify_url, emoji="🔒")
+        verify_btn = discord.ui.Button(label="인증하기", style=discord.ButtonStyle.link, url=verify_url, emoji="🔒")
         verify_view.add_item(verify_btn)
         
         try:
@@ -227,7 +227,7 @@ class SetupView(discord.ui.View):
         except Exception as e:
             await interaction.response.send_message(f"❌ 임베드 전송 중 오류가 발생했습니다: {e}", ephemeral=True)
 
-@bot_func.tree.command(name="설치", description="서버 관리자용: 구글 로그인을 통해 파이어베이스 연동을 설정합니다.")
+@bot_func.tree.command(name="설치", description="서버 관리자용: 해당 명령어를 사용해야 정상적으로 이용이 가능합니다.")
 async def cmd_setup(interaction: discord.Interaction):
     if not interaction.user.guild_permissions.administrator:
         await interaction.response.send_message("❌ 이 명령어는 서버 관리자만 사용할 수 있습니다.", ephemeral=True)
