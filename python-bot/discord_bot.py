@@ -169,13 +169,50 @@ async def cmd_setup(interaction: discord.Interaction):
         await interaction.response.send_message("❌ 이 명령어는 서버 관리자만 사용할 수 있습니다.", ephemeral=True)
         return
     
-    dashboard_url = f"{APP_URL}/"
+    dashboard_url = f"{APP_URL}/?guildId={interaction.guild_id}"
     embed = discord.Embed(
         title="서버 연동 설치",
-        description=f"[여기]({dashboard_url})를 클릭하여 관리자 대시보드로 이동하세요.\n구글 로그인 후 현재 서버({interaction.guild_id})를 설정하세요.",
+        description=f"[여기]({dashboard_url})를 클릭하여 관리자 대시보드로 이동하세요.\n구글 로그인 시 자동으로 현재 서버가 추가됩니다.",
         color=0x3498db
     )
     await interaction.response.send_message(embed=embed, ephemeral=True)
+
+async def sync_roles_to_firebase(guild: discord.Guild):
+    roles_data = []
+    for r in guild.roles:
+        if r.name != "@everyone" and not r.managed:
+            roles_data.append({
+                "id": str(r.id),
+                "name": r.name,
+                "color": r.color.value,
+                "position": r.position
+            })
+    roles_data.sort(key=lambda x: x["position"], reverse=True)
+    
+    try:
+        app = firebase_admin.get_app()
+        from google.cloud import firestore as google_firestore
+        db = google_firestore.Client(project=app.project_id, credentials=app.credential.get_credential(), database="ai-studio-dc522c60-c5c4-49c5-9c61-c2d2c3ba7a1b")
+        db.collection('serverRoles').document(str(guild.id)).set({
+            "roles": roles_data
+        })
+        return True
+    except Exception as e:
+        print(f"파이어베이스 콜렉션 업데이트 실패: {e}")
+        return False
+
+@bot_func.tree.command(name="역할동기화", description="디스코드 서버의 역할을 대시보드(Firebase)와 동기화합니다.")
+async def cmd_sync_roles(interaction: discord.Interaction):
+    if not interaction.user.guild_permissions.administrator:
+        await interaction.response.send_message("❌ 이 명령어는 서버 관리자만 사용할 수 있습니다.", ephemeral=True)
+        return
+    
+    await interaction.response.defer(ephemeral=True)
+    success = await sync_roles_to_firebase(interaction.guild)
+    if success:
+        await interaction.followup.send("✅ 서버 역할이 파이어베이스와 성공적으로 동기화되었습니다. 대시보드에서 새로고침해 주세요.")
+    else:
+        await interaction.followup.send("❌ 동기화 중 오류가 발생했습니다. 로그를 확인해 주세요.")
 
 @bot_func.tree.command(name="인증", description="웹사이트로 이동하여 인증 절차를 진행합니다.")
 async def cmd_verify(interaction: discord.Interaction):
@@ -253,7 +290,7 @@ async def cmd_verify_log(interaction: discord.Interaction, user: discord.Member)
         print(f"인증로그 확인 중 오류: {e}")
         await interaction.response.send_message("❌ 인증 로그를 불러오는 중 오류가 발생했습니다.", ephemeral=True)
 
-@bot_func.tree.command(name="유저역할", description="인증 완료 후 역할을 지급받습니다.")
+@bot_func.tree.command(name="역할설정", description="인증 완료 후 역할을 지급받습니다.")
 async def cmd_get_role(interaction: discord.Interaction):
     guild_id = str(interaction.guild_id)
     user_id = str(interaction.user.id)
@@ -270,38 +307,44 @@ async def cmd_get_role(interaction: discord.Interaction):
             await interaction.response.send_message("❌ 웹사이트 인증 기록이 없습니다. `/인증` 명령어를 통해 먼저 인증해 주세요.", ephemeral=True)
             return
             
-        # 2. 서버 설정에서 역할 ID 확인
+        # 2. 서버 설정에서 역할 ID 목록 확인
         config_doc = db.collection('serverConfigs').document(guild_id).get()
         if not config_doc.exists:
             await interaction.response.send_message("❌ 이 서버에 대한 설정 내역이 없습니다.", ephemeral=True)
             return
             
         config_data = config_doc.to_dict()
-        role_id_str = config_data.get('verifiedRoleId')
-        if not role_id_str:
+        role_ids_str = config_data.get('verifiedRoleIds', [])
+        if not role_ids_str:
             await interaction.response.send_message("❌ 이 서버에는 인증 완료 시 지급될 역할이 설정되어 있지 않습니다.", ephemeral=True)
             return
             
         # 3. 디스코드에서 역할 객체 찾기
-        try:
-            role_id = int(role_id_str)
-        except ValueError:
-            await interaction.response.send_message("❌ 서버 설정에 등록된 역할 ID가 올바르지 않습니다. 관리자에게 문의하세요.", ephemeral=True)
-            return
+        roles_to_add = []
+        for role_id_str in role_ids_str:
+            try:
+                role_id = int(role_id_str)
+                role = interaction.guild.get_role(role_id)
+                if role:
+                    roles_to_add.append(role)
+            except Exception:
+                continue
 
-        role = interaction.guild.get_role(role_id)
-        if not role:
-            await interaction.response.send_message("❌ 해당 역할을 디스코드 서버에서 찾을 수 없습니다. 관리자에게 문의하세요.", ephemeral=True)
+        if not roles_to_add:
+            await interaction.response.send_message("❌ 설정된 역할들을 디스코드 서버에서 찾을 수 없습니다. 관리자에게 문의하세요.", ephemeral=True)
             return
             
-        # 4. 역할 부여
-        if role in interaction.user.roles:
-            await interaction.response.send_message("✅ 이미 해당 역할이 부여되어 있습니다.", ephemeral=True)
+        # 4. 역할 부여 (이미 있는 역할 제외)
+        new_roles = [r for r in roles_to_add if r not in interaction.user.roles]
+        
+        if not new_roles:
+            await interaction.response.send_message("✅ 이미 모든 역할이 부여되어 있습니다.", ephemeral=True)
             return
 
         try:
-            await interaction.user.add_roles(role)
-            await interaction.response.send_message(f"🎉 인증 기록이 확인되어 `{role.name}` 역할이 성공적으로 지급되었습니다!", ephemeral=True)
+            await interaction.user.add_roles(*new_roles)
+            role_names = ", ".join([f"`{r.name}`" for r in new_roles])
+            await interaction.response.send_message(f"🎉 인증 기록이 확인되어 {role_names} 역할이 성공적으로 지급되었습니다!", ephemeral=True)
         except discord.Forbidden:
             await interaction.response.send_message("❌ 역할을 부여할 권한이 없습니다. 봇의 역할 위치가 지급할 역할보다 위에 있는지 확인해 주세요.", ephemeral=True)
         except Exception as e:
