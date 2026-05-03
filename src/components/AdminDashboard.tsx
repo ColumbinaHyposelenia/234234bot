@@ -9,6 +9,58 @@ const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app, firebaseConfig.firestoreDatabaseId);
 
+function RoleSelector({ serverId, selectedRoleIds, onChange }: { serverId: string, selectedRoleIds: string[], onChange: (roles: string[]) => void }) {
+  const [roles, setRoles] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    fetch(`/api/roles/${serverId}`)
+      .then(res => {
+        if(!res.ok) throw new Error("Failed to load roles");
+        return res.json();
+      })
+      .then(data => {
+        setRoles(data);
+        setLoading(false);
+      })
+      .catch(e => {
+        setError(e.message);
+        setLoading(false);
+      });
+  }, [serverId]);
+
+  if (loading) return <div className="text-xs text-gray-500">역할을 불러오는 중...</div>;
+  if (error) return <div className="text-xs text-red-500">역할 불러오기 실패: {error}</div>;
+
+  const toggleRole = (roleId: string) => {
+    if (selectedRoleIds.includes(roleId)) {
+      onChange(selectedRoleIds.filter(id => id !== roleId));
+    } else {
+      onChange([...selectedRoleIds, roleId]);
+    }
+  };
+
+  return (
+    <div className="mt-2 text-sm border bg-white p-2 flex flex-col gap-1 max-h-32 overflow-y-auto rounded shadow-inner">
+      {roles.length === 0 && <div className="text-gray-500 text-xs">선택 가능한 역할이 없습니다.</div>}
+      {roles.map(role => (
+        <label key={role.id} className="flex items-center gap-2 cursor-pointer hover:bg-gray-50 p-1 rounded">
+          <input 
+            type="checkbox" 
+            checked={selectedRoleIds.includes(role.id)}
+            onChange={() => toggleRole(role.id)}
+            className="accent-blue-600"
+          />
+          <span style={{ color: role.color ? `#${role.color.toString(16).padStart(6, '0')}` : 'inherit'}} className="font-medium">
+            {role.name}
+          </span>
+        </label>
+      ))}
+    </div>
+  );
+}
+
 export default function AdminDashboard() {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
@@ -177,18 +229,15 @@ export default function AdminDashboard() {
                     <div className="flex-1 mr-4">
                       <div className="font-mono text-lg font-medium">{s.guildId}</div>
                       <div className="text-xs text-gray-500 mb-2">생성일: {new Date(s.createdAt).toLocaleString()}</div>
-                      <label className="text-xs text-gray-500 block mb-1">지급할 역할 ID (선택)</label>
-                      <input 
-                        type="text" 
-                        className="w-full border p-1 rounded text-sm focus:outline-blue-500" 
-                        placeholder="ex) 123456789012345678"
-                        value={s.verifiedRoleId || ''}
-                        onChange={async (e) => {
-                          const newRoleId = e.target.value;
+                      <label className="text-xs text-gray-500 block mb-1">지급할 역할</label>
+                      <RoleSelector
+                        serverId={s.guildId}
+                        selectedRoleIds={s.verifiedRoleIds || []}
+                        onChange={async (newRoleIds) => {
                           try {
                             const { updateDoc } = await import('firebase/firestore');
                             await updateDoc(doc(db, 'serverConfigs', s.id), { 
-                              verifiedRoleId: newRoleId,
+                              verifiedRoleIds: newRoleIds,
                               updatedAt: Date.now()
                             });
                             loadData(user.uid);
