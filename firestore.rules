@@ -12,11 +12,11 @@ service cloud.firestore {
     
     function isValidServerConfig(data) {
       return data.keys().hasAll(['adminUid', 'guildId', 'createdAt', 'updatedAt']) &&
-             data.keys().size() == 4 &&
              data.adminUid is string && data.adminUid.size() <= 128 &&
              data.guildId is string && data.guildId.size() <= 128 &&
              data.createdAt is number &&
-             data.updatedAt is number;
+             data.updatedAt is number &&
+             (!data.keys().hasAny(['verifiedRoleId']) || (data.verifiedRoleId is string && data.verifiedRoleId.size() <= 128));
     }
     
     function isValidVerificationLog(data) {
@@ -47,7 +47,7 @@ service cloud.firestore {
                      incoming().createdAt == existing().createdAt &&
                      incoming().updatedAt >= request.time.toMillis() - 60000 &&
                      incoming().updatedAt <= request.time.toMillis() + 60000 &&
-                     incoming().diff(existing()).affectedKeys().hasOnly(['updatedAt']);
+                     incoming().diff(existing()).affectedKeys().hasOnly(['updatedAt', 'verifiedRoleId']);
       allow delete: if isSignedIn() && existing().adminUid == request.auth.uid;
     }
 
