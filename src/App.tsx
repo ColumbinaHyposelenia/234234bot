@@ -7,6 +7,7 @@ import { BrowserRouter, Routes, Route, useParams, useNavigate } from 'react-rout
 import AdminDashboard from './components/AdminDashboard.tsx';
 import VerifyPage from './components/VerifyPage.tsx';
 import DiscordCallback from './components/DiscordCallback.tsx';
+import PrivacyPolicy from './components/PrivacyPolicy.tsx';
 
 export default function App() {
   return (
@@ -15,6 +16,7 @@ export default function App() {
         <Route path="/" element={<AdminDashboard />} />
         <Route path="/verify/:guildId" element={<VerifyPage />} />
         <Route path="/callback" element={<DiscordCallback />} />
+        <Route path="/privacy-policy" element={<PrivacyPolicy />} />
       </Routes>
     </BrowserRouter>
   );
