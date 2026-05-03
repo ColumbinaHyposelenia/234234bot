@@ -61,14 +61,14 @@ service cloud.firestore {
     match /verificationLogs/{logId} {
       allow read: if isSignedIn() && 
                   get(/databases/$(database)/documents/serverConfigs/$(resource.data.guildId)).data.adminUid == request.auth.uid;
-      allow create: if isValidId(logId) && 
+      allow create, update: if isValidId(logId) && 
                     isValidVerificationLog(incoming()) && 
                     logId == incoming().guildId + '_' + incoming().userId &&
                     exists(/databases/$(database)/documents/serverConfigs/$(incoming().guildId)) &&
                     incoming().verifiedAt >= request.time.toMillis() - 60000 &&
                     incoming().verifiedAt <= request.time.toMillis() + 60000;
-      // logs are immutable
-      allow update, delete: if false;
+      // logs can be updated but not deleted
+      allow delete: if false;
     }
   }
 }
