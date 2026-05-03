@@ -68,15 +68,42 @@ export default function AdminDashboard() {
   const [logs, setLogs] = useState<any[]>([]);
   const [newGuildId, setNewGuildId] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
+  const [addingServer, setAddingServer] = useState(false);
 
   useEffect(() => {
-    const unsub = onAuthStateChanged(auth, (u) => {
+    const unsub = onAuthStateChanged(auth, async (u) => {
       setUser(u);
+      
+      const queryParams = new URLSearchParams(window.location.search);
+      const setupGuildId = queryParams.get('guildId');
+
+      if (u) {
+        if (setupGuildId && !addingServer) {
+          setAddingServer(true);
+          try {
+            const ref = doc(db, 'serverConfigs', setupGuildId);
+            await setDoc(ref, {
+              adminUid: u.uid,
+              guildId: setupGuildId,
+              createdAt: Date.now(),
+              updatedAt: Date.now(),
+              verifiedRoleIds: []
+            });
+            window.history.replaceState({}, document.title, "/");
+          } catch (e: any) {
+            handleFirestoreError(e, OperationType.CREATE, `serverConfigs/${setupGuildId}`);
+          }
+        }
+        await loadData(u.uid);
+      } else if (setupGuildId && !u) {
+         // Auto-login to handle guildId
+         const provider = new GoogleAuthProvider();
+         signInWithPopup(auth, provider).catch(console.error);
+      }
       setLoading(false);
-      if (u) loadData(u.uid);
     });
     return unsub;
-  }, []);
+  }, [addingServer]);
 
   const loadData = async (uid: string) => {
     try {
