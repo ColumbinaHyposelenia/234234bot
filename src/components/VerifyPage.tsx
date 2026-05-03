@@ -1,6 +1,6 @@
 /// <reference types="vite/client" />
 import React, { useEffect, useState } from 'react';
-import { useParams } from 'react-router-dom';
+import { useParams, Link } from 'react-router-dom';
 import { doc, getDoc } from 'firebase/firestore';
 import { db } from '../lib/firebaseUtils';
 
@@ -75,10 +75,14 @@ export default function VerifyPage() {
         <button 
           onClick={handleVerify}
           disabled={!agreed}
-          className={`w-full py-3 text-white rounded-lg font-bold transition-colors ${agreed ? 'bg-[#5865F2] hover:bg-[#4752C4]' : 'bg-gray-400 cursor-not-allowed'}`}
+          className={`w-full py-3 text-white rounded-lg font-bold transition-colors mb-4 ${agreed ? 'bg-[#5865F2] hover:bg-[#4752C4]' : 'bg-gray-400 cursor-not-allowed'}`}
         >
           Discord로 인증하기
         </button>
+
+        <div className="text-sm text-gray-400">
+          인증을 진행함으로써 <Link to="/privacy-policy" target="_blank" rel="noopener noreferrer" className="underline hover:text-gray-600 transition-colors">개인정보 처리방침</Link>에 동의하는 것으로 간주됩니다.
+        </div>
       </div>
     </div>
   );
