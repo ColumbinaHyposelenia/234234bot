@@ -169,13 +169,13 @@ class SetupView(discord.ui.View):
         
         # 1. Dashboard Button
         self.add_item(discord.ui.Button(
-            label="1. 서버 대시보드 등록", 
+            label="서버 대시보드 등록", 
             style=discord.ButtonStyle.link, 
             url=dashboard_url,
             row=0
         ))
 
-    @discord.ui.button(label="2. 서버 역할 동기화", style=discord.ButtonStyle.primary, custom_id="setup_sync_roles_btn", row=0)
+    @discord.ui.button(label="서버 역할 동기화", style=discord.ButtonStyle.primary, custom_id="setup_sync_roles_btn", row=0)
     async def sync_roles_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
         if not interaction.user.guild_permissions.administrator:
             await interaction.response.send_message("❌ 관리자만 사용할 수 있습니다.", ephemeral=True)
@@ -191,7 +191,7 @@ class SetupView(discord.ui.View):
     @discord.ui.select(
         cls=discord.ui.ChannelSelect,
         channel_types=[discord.ChannelType.text],
-        placeholder="3. 인증 임베드를 전송할 채널 선택 (선택사항)",
+        placeholder="인증 임베드를 전송할 채널 선택 (선택사항)",
         custom_id="setup_select_channel",
         row=1
     )
@@ -210,8 +210,8 @@ class SetupView(discord.ui.View):
         verify_url = f"{APP_URL}/verify/{interaction.guild_id}"
         
         embed = discord.Embed(
-            title="🛡️ 서버 유저 인증",
-            description="이 서버의 모든 기능을 이용하려면 아래 버튼을 눌러 인증을 완료해 주셔야 합니다.\n\n다계정 어뷰징 및 악의적인 사용자를 방지하기 위한 절차이므로 협조 부탁드립니다.",
+            title="🛡️ 서버 입장 보안 인증",
+            description="원활한 서버 이용을 위해 본인 인증이 필요합니다.\n\n현재 쾌적한 커뮤니티 환경을 위해 다중 계정 및 봇 유입을 제한하고 있습니다. 아래 버튼을 눌러 인증을 완료해 주세요.",
             color=0x2ecc71
         )
         
