@@ -163,6 +163,70 @@ async def on_message(message):
     if message.author == bot_func.user: return
     await bot_func.process_commands(message)
 
+class SetupView(discord.ui.View):
+    def __init__(self, guild_id: str, dashboard_url: str):
+        super().__init__(timeout=None)
+        
+        # 1. Dashboard Button
+        self.add_item(discord.ui.Button(
+            label="1. 서버 대시보드 등록", 
+            style=discord.ButtonStyle.link, 
+            url=dashboard_url,
+            row=0
+        ))
+
+    @discord.ui.button(label="2. 서버 역할 동기화", style=discord.ButtonStyle.primary, custom_id="setup_sync_roles_btn", row=0)
+    async def sync_roles_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if not interaction.user.guild_permissions.administrator:
+            await interaction.response.send_message("❌ 관리자만 사용할 수 있습니다.", ephemeral=True)
+            return
+            
+        await interaction.response.defer(ephemeral=True)
+        success = await sync_roles_to_firebase(interaction.guild)
+        if success:
+            await interaction.followup.send("✅ 서버 역할이 파이어베이스와 성공적으로 동기화되었습니다.", ephemeral=True)
+        else:
+            await interaction.followup.send("❌ 역할 동기화 중 오류가 발생했습니다.", ephemeral=True)
+
+    @discord.ui.select(
+        cls=discord.ui.ChannelSelect,
+        channel_types=[discord.ChannelType.text],
+        placeholder="3. 인증 임베드를 전송할 채널 선택 (선택사항)",
+        custom_id="setup_select_channel",
+        row=1
+    )
+    async def select_channel(self, interaction: discord.Interaction, select: discord.ui.ChannelSelect):
+        if not interaction.user.guild_permissions.administrator:
+            await interaction.response.send_message("❌ 관리자만 사용할 수 있습니다.", ephemeral=True)
+            return
+
+        channel_data = select.values[0]
+        channel = interaction.guild.get_channel(channel_data.id)
+        
+        if not channel or not isinstance(channel, discord.TextChannel):
+            await interaction.response.send_message("❌ 올바른 텍스트 채널을 찾을 수 없습니다.", ephemeral=True)
+            return
+
+        verify_url = f"{APP_URL}/verify/{interaction.guild_id}"
+        
+        embed = discord.Embed(
+            title="🛡️ 서버 유저 인증",
+            description="이 서버의 모든 기능을 이용하려면 아래 버튼을 눌러 인증을 완료해 주셔야 합니다.\n\n다계정 어뷰징 및 악의적인 사용자를 방지하기 위한 절차이므로 협조 부탁드립니다.",
+            color=0x2ecc71
+        )
+        
+        verify_view = discord.ui.View(timeout=None)
+        verify_btn = discord.ui.Button(label="인증하러 가기", style=discord.ButtonStyle.link, url=verify_url, emoji="🔒")
+        verify_view.add_item(verify_btn)
+        
+        try:
+            await channel.send(embed=embed, view=verify_view)
+            await interaction.response.send_message(f"✅ {channel.mention} 채널에 인증 임베드를 성공적으로 전송했습니다.", ephemeral=True)
+        except discord.Forbidden:
+            await interaction.response.send_message(f"❌ {channel.mention} 채널에 메시지를 보낼 권한이 없습니다. 봇의 권한을 확인해주세요.", ephemeral=True)
+        except Exception as e:
+            await interaction.response.send_message(f"❌ 임베드 전송 중 오류가 발생했습니다: {e}", ephemeral=True)
+
 @bot_func.tree.command(name="설치", description="서버 관리자용: 구글 로그인을 통해 파이어베이스 연동을 설정합니다.")
 async def cmd_setup(interaction: discord.Interaction):
     if not interaction.user.guild_permissions.administrator:
@@ -171,11 +235,15 @@ async def cmd_setup(interaction: discord.Interaction):
     
     dashboard_url = f"{APP_URL}/?guildId={interaction.guild_id}"
     embed = discord.Embed(
-        title="서버 연동 설치",
-        description=f"[여기]({dashboard_url})를 클릭하여 관리자 대시보드로 이동하세요.\n구글 로그인 시 자동으로 현재 서버가 추가됩니다.",
+        title="🛠️ 서버 초기 세팅 마법사",
+        description="아래 순서대로 세팅을 진행해 주세요.\n\n"
+                    "**1. 서버 대시보드 등록**\n대시보드 웹사이트로 이동하여 구글 계정으로 로그인합니다.\n\n"
+                    "**2. 서버 역할 동기화**\n디스코드 서버의 역할을 파이어베이스로 복사합니다.\n\n"
+                    "**3. 인증 채널 지정 (선택)**\n유저가 인증할 수 있는 버튼 임베드를 특정 채널에 전송합니다.",
         color=0x3498db
     )
-    await interaction.response.send_message(embed=embed, ephemeral=True)
+    view = SetupView(str(interaction.guild_id), dashboard_url)
+    await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
 
 async def sync_roles_to_firebase(guild: discord.Guild):
     roles_data = []
@@ -213,6 +281,33 @@ async def cmd_sync_roles(interaction: discord.Interaction):
         await interaction.followup.send("✅ 서버 역할이 파이어베이스와 성공적으로 동기화되었습니다. 대시보드에서 새로고침해 주세요.")
     else:
         await interaction.followup.send("❌ 동기화 중 오류가 발생했습니다. 로그를 확인해 주세요.")
+
+@bot_func.tree.command(name="인증채널", description="지정한 채널에 유저 인증용 임베드와 버튼을 전송합니다. (관리자 전용)")
+@app_commands.describe(channel="인증 임베드를 전송할 채널")
+async def cmd_verify_channel(interaction: discord.Interaction, channel: discord.TextChannel):
+    if not interaction.user.guild_permissions.administrator:
+        await interaction.response.send_message("❌ 이 명령어는 서버 관리자만 사용할 수 있습니다.", ephemeral=True)
+        return
+        
+    verify_url = f"{APP_URL}/verify/{interaction.guild_id}"
+    
+    embed = discord.Embed(
+        title="🛡️ 서버 유저 인증",
+        description="이 서버의 모든 기능을 이용하려면 아래 버튼을 눌러 인증을 완료해 주셔야 합니다.\n\n다계정 어뷰징 및 악의적인 사용자를 방지하기 위한 절차이므로 협조 부탁드립니다.",
+        color=0x2ecc71
+    )
+    
+    view = discord.ui.View(timeout=None)
+    button = discord.ui.Button(label="인증하러 가기", style=discord.ButtonStyle.link, url=verify_url, emoji="🔒")
+    view.add_item(button)
+    
+    try:
+        await channel.send(embed=embed, view=view)
+        await interaction.response.send_message(f"✅ {channel.mention} 채널에 인증 임베드를 성공적으로 전송했습니다.", ephemeral=True)
+    except discord.Forbidden:
+        await interaction.response.send_message(f"❌ {channel.mention} 채널에 메시지를 보낼 권한이 없습니다.", ephemeral=True)
+    except Exception as e:
+        await interaction.response.send_message(f"❌ 임베드 전송 중 오류가 발생했습니다: {e}", ephemeral=True)
 
 @bot_func.tree.command(name="인증", description="웹사이트로 이동하여 인증 절차를 진행합니다.")
 async def cmd_verify(interaction: discord.Interaction):
