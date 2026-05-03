@@ -211,7 +211,7 @@ class SetupView(discord.ui.View):
         
         embed = discord.Embed(
             title="🛡️ 서버 입장 보안 인증",
-            description="원활한 서버 이용을 위해 본인 인증이 필요합니다.\n\n현재 쾌적한 커뮤니티 환경을 위해 다중 계정 및 봇 유입을 제한하고 있습니다. 아래 버튼을 눌러 인증을 완료해 주세요.",
+            description="모든 유저가 안심하고 활동할 수 있는 환경을 만들고 있어요!\n\n아래 인증 버튼을 클릭하면 서버의 모든 채널에 입장하실 수 있습니다.",
             color=0x2ecc71
         )
         
