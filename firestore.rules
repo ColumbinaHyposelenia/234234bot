@@ -1,0 +1,64 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /{document=**} {
+      allow read, write: if false;
+    }
+    
+    function isSignedIn() { return request.auth != null; }
+    function incoming() { return request.resource.data; }
+    function existing() { return resource.data; }
+    function isValidId(id) { return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$'); }
+    
+    function isValidServerConfig(data) {
+      return data.keys().hasAll(['adminUid', 'guildId', 'createdAt', 'updatedAt']) &&
+             data.keys().size() == 4 &&
+             data.adminUid is string && data.adminUid.size() <= 128 &&
+             data.guildId is string && data.guildId.size() <= 128 &&
+             data.createdAt is number &&
+             data.updatedAt is number;
+    }
+    
+    function isValidVerificationLog(data) {
+      return data.keys().hasAll(['guildId', 'userId', 'discordTag', 'email', 'verifiedAt', 'deviceId', 'maskedIp', 'expireAt']) &&
+             data.guildId is string && data.guildId.size() <= 128 &&
+             data.userId is string && data.userId.size() <= 128 &&
+             data.discordTag is string && data.discordTag.size() <= 128 &&
+             data.email is string && data.email.size() <= 256 &&
+             data.deviceId is string && data.deviceId.size() <= 128 &&
+             data.maskedIp is string && data.maskedIp.size() <= 128 &&
+             data.verifiedAt is number &&
+             data.expireAt is number;
+    }
+    
+    match /serverConfigs/{guildId} {
+      allow read: if isSignedIn() && existing().adminUid == request.auth.uid;
+      allow create: if isSignedIn() &&
+                    isValidId(guildId) &&
+                    isValidServerConfig(incoming()) &&
+                    incoming().adminUid == request.auth.uid &&
+                    incoming().createdAt == request.time.toMillis() &&
+                    incoming().updatedAt == request.time.toMillis();
+      allow update: if isSignedIn() &&
+                     existing().adminUid == request.auth.uid &&
+                     isValidServerConfig(incoming()) &&
+                     incoming().adminUid == existing().adminUid &&
+                     incoming().createdAt == existing().createdAt &&
+                     incoming().updatedAt == request.time.toMillis() &&
+                     incoming().diff(existing()).affectedKeys().hasOnly(['updatedAt']);
+      allow delete: if isSignedIn() && existing().adminUid == request.auth.uid;
+    }
+
+    match /verificationLogs/{logId} {
+      allow read: if isSignedIn() && 
+                  get(/databases/$(database)/documents/serverConfigs/$(resource.data.guildId)).data.adminUid == request.auth.uid;
+      allow create: if isValidId(logId) && 
+                    isValidVerificationLog(incoming()) && 
+                    logId == incoming().guildId + '_' + incoming().userId &&
+                    exists(/databases/$(database)/documents/serverConfigs/$(incoming().guildId)) &&
+                    incoming().verifiedAt == request.time.toMillis();
+      // logs are immutable
+      allow update, delete: if false;
+    }
+  }
+}

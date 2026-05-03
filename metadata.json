@@ -1,0 +1,6 @@
+{
+  "name": "Discord Verification System",
+  "description": "A web dashboard and backend for a Discord verification bot using Firebase.",
+  "requestFramePermissions": [],
+  "majorCapabilities": []
+}
