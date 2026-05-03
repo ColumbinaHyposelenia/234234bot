@@ -174,9 +174,29 @@ export default function AdminDashboard() {
               <div className="grid gap-4 md:grid-cols-2">
                 {servers.map(s => (
                   <div key={s.id} className="border p-4 rounded-lg flex justify-between items-center bg-gray-50 shadow-sm">
-                    <div>
+                    <div className="flex-1 mr-4">
                       <div className="font-mono text-lg font-medium">{s.guildId}</div>
-                      <div className="text-xs text-gray-500">생성일: {new Date(s.createdAt).toLocaleString()}</div>
+                      <div className="text-xs text-gray-500 mb-2">생성일: {new Date(s.createdAt).toLocaleString()}</div>
+                      <label className="text-xs text-gray-500 block mb-1">지급할 역할 ID (선택)</label>
+                      <input 
+                        type="text" 
+                        className="w-full border p-1 rounded text-sm focus:outline-blue-500" 
+                        placeholder="ex) 123456789012345678"
+                        value={s.verifiedRoleId || ''}
+                        onChange={async (e) => {
+                          const newRoleId = e.target.value;
+                          try {
+                            const { updateDoc } = await import('firebase/firestore');
+                            await updateDoc(doc(db, 'serverConfigs', s.id), { 
+                              verifiedRoleId: newRoleId,
+                              updatedAt: Date.now()
+                            });
+                            loadData(user.uid);
+                          } catch(err: any) {
+                            handleFirestoreError(err, OperationType.UPDATE, `serverConfigs/${s.id}`);
+                          }
+                        }}
+                      />
                     </div>
                     <button onClick={() => removeServer(s.id)} className="px-3 py-1 bg-red-100 text-red-600 rounded hover:bg-red-200 text-sm font-medium">삭제</button>
                   </div>
