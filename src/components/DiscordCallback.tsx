@@ -71,7 +71,12 @@ export default function DiscordCallback() {
           expireAt: now + 90 * 24 * 60 * 60 * 1000
         });
 
-        setStatus(`인증 완료! ${discordTag} 님 환영합니다.`);
+        // Add an artificial delay to allow the bot time to assign roles
+        setStatus('보안 확인 및 역할 지급 처리 중입니다...');
+        
+        setTimeout(() => {
+          setStatus(`인증 완료! ${discordTag} 님 환영합니다.`);
+        }, 5000);
 
       } catch (e: any) {
          console.error(e);
@@ -104,7 +109,11 @@ export default function DiscordCallback() {
                <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
             </div>
             <h2 className="text-xl font-bold text-gray-800 mb-2">{status}</h2>
-            {status.includes('완료') && <p className="text-gray-500 mt-4 text-sm">이제 이 창을 닫고 디스코드로 돌아가셔도 됩니다.</p>}
+            {status.includes('완료') ? (
+              <p className="text-green-600 mt-4 text-sm font-medium">이제 이 창을 닫고 디스코드로 돌아가셔도 됩니다!</p>
+            ) : (
+              <p className="text-gray-500 mt-4 text-sm">잠시만 기다려 주세요. 서버 권한을 확인하고 있습니다.</p>
+            )}
           </div>
         )}
       </div>
