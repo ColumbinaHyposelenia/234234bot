@@ -77,7 +77,12 @@ export default function DiscordCallback() {
           '디스코드 계정 보안 상태를 분석하고 있습니다...',
           '서버 관리자 설정과 권한을 동기화 중입니다...',
           '인증 데이터베이스 기록을 최종 검증하고 있습니다...',
-          '거의 다 되었습니다! 역할 지급 시스템 호출 중...'
+          '유저의 정보를 암호화하고 있습니다...',
+          '서버 역할 레이어 계층 구조를 검토하는 중입니다...',
+          '우회 인증 시도 및 매크로 사용 여부를 체크하고 있습니다...',
+          '다중 계정 접속 기록을 대조 확인하고 있습니다...',
+          '거의 다 되었습니다! 역할 지급 시스템 호출 중...',
+          '마지막으로 지급된 역할의 권한을 확인하고 있습니다...'
         ];
         
         setStatus(loadingMessages[0]);
@@ -90,12 +95,12 @@ export default function DiscordCallback() {
           } else {
             clearInterval(messageInterval);
           }
-        }, 8000); // Change message every 8s
+        }, 4500); // Change message every 4.5s
 
         setTimeout(() => {
           clearInterval(messageInterval);
           setStatus(`인증 완료! ${discordTag} 님 환영합니다.`);
-        }, 40000); // Total 40s wait time
+        }, 45000); // Total 45s wait time
 
       } catch (e: any) {
          console.error(e);
