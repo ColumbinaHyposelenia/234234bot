@@ -25,20 +25,24 @@ export default function DiscordCallback() {
       window.history.replaceState({}, document.title, window.location.pathname);
     }
 
-    if (!code || !obfuscatedState) {
+    const guildId = obfuscatedState ? atob(obfuscatedState) : null;
+
+    if (!code || !guildId) {
       if (!location.search && !location.hash) return; // Wait for initial load
-      setError('잘못된 인증 접근입니다.');
+      setError('인증 코드가 만료되었거나 잘못된 접근입니다.');
       setStatus('');
       return;
     }
 
-    const guildId = atob(obfuscatedState); // Decode obfuscated Guild ID
-
     const verify = async () => {
       try {
+        console.log(`[Frontend] Starting verification for Guild: ${guildId}`);
         const response = await fetch('/api/discord/exchange', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: { 
+            'Content-Type': 'application/json',
+            'Accept': 'application/json'
+          },
           body: JSON.stringify({ code, state: guildId })
         });
 
