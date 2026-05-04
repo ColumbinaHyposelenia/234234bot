@@ -1,170 +1,138 @@
-import "dotenv/config";
-import express from "express";
-import { createServer as createViteServer } from "vite";
-import path from "path";
-import cors from "cors";
-import axios from "axios";
-import crypto from "crypto";
+import React, { useEffect, useState } from 'react';
+import { useLocation } from 'react-router-dom';
 
-// For server-side Firebase
-import { initializeApp, cert, getApp, getApps } from "firebase-admin/app";
-import { getFirestore } from "firebase-admin/firestore";
+export default function DiscordCallback() {
+  const location = useLocation();
+  const [status, setStatus] = useState('인증 정보를 처리하는 중입니다...');
+  const [error, setError] = useState('');
 
-// Initialize Firebase Admin
-import fs from "fs";
-const firebaseConfig = JSON.parse(fs.readFileSync("./firebase-applet-config.json", "utf-8"));
-
-if (!getApps().length) {
-  initializeApp({
-    projectId: firebaseConfig.projectId,
-  });
-}
-const db = getFirestore(firebaseConfig.firestoreDatabaseId);
-
-function hashId(id: string) {
-  return crypto.createHash("sha256").update(id).digest("hex");
-}
-
-async function getGuildRoles(guildId: string) {
-  // This is a placeholder or you can implement Discord Bot API call here
-  // For now, return empty to let it compile
-  return [];
-}
-
-async function startServer() {
-  const app = express();
-  const PORT = 3000;
-
-  app.use(cors());
-  app.use(express.json());
-
-  // API routes
-  app.get("/api/health", (req, res) => {
-    res.json({ status: "ok" });
-  });
-
-  // Secure Discord OAuth2 Exchange
-  app.post("/api/discord/exchange", async (req, res) => {
-    const { code, state } = req.body;
-    console.log(`[OAuth2] Exchange attempt received. State: ${state}`);
+  useEffect(() => {
+    const queryParams = new URLSearchParams(location.search);
+    const hashParams = new URLSearchParams(location.hash.substring(1));
+    const oldToken = hashParams.get('access_token');
     
-    if (!code) {
-      return res.status(400).json({ error: "Missing code" });
+    if (oldToken) {
+      setError('보안 정책업데이트로 인해 앱을 다시 시작해 주세요. (기존 세션 만료)');
+      window.history.replaceState({}, document.title, window.location.pathname);
+      return;
     }
 
-    try {
-      const clientId = process.env.DISCORD_CLIENT_ID;
-      const clientSecret = process.env.DISCORD_CLIENT_SECRET;
-      const redirectUri = process.env.DISCORD_REDIRECT_URI || `${req.get("origin")}/callback`;
+    const code = queryParams.get('code');
+    const obfuscatedState = queryParams.get('state');
 
-      if (!clientId || !clientSecret) {
-        throw new Error("Discord credentials not configured in environment");
-      }
+    // Clean URL immediately to hide the code from address bar and history
+    if (code || obfuscatedState) {
+      window.history.replaceState({}, document.title, window.location.pathname);
+    }
 
-      // 1. Exchange Code for Token
-      const tokenResponse = await axios.post(
-        "https://discord.com/api/oauth2/token",
-        new URLSearchParams({
-          client_id: clientId,
-          client_secret: clientSecret,
-          grant_type: "authorization_code",
-          code: code,
-          redirect_uri: redirectUri,
-        }).toString(),
-        {
-          headers: {
-            "Content-Type": "application/x-www-form-urlencoded",
-          },
+    if (!code || !obfuscatedState) {
+      if (!location.search && !location.hash) return; // Wait for initial load
+      setError('잘못된 인증 접근입니다.');
+      setStatus('');
+      return;
+    }
+
+    const guildId = atob(obfuscatedState); // Decode obfuscated Guild ID
+
+    const verify = async () => {
+      try {
+        const response = await fetch('/api/discord/exchange', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ code, state: guildId })
+        });
+
+        const contentType = response.headers.get('content-type');
+        if (!response.ok) {
+          if (contentType && contentType.includes('application/json')) {
+            const errData = await response.json();
+            throw new Error(errData.error || '인증 교환 중 오류가 발생했습니다.');
+          } else {
+            const text = await response.text();
+            console.error('Server returned non-JSON error:', text);
+            throw new Error(`서버 응답 오류 (HTTP ${response.status}). 관리자에게 문의하세요.`);
+          }
         }
-      );
 
-      const { access_token } = tokenResponse.data;
+        if (!contentType || !contentType.includes('application/json')) {
+          const text = await response.text();
+          console.error('Unexpected non-JSON response:', text);
+          throw new Error('서버로부터 올바른 응답(JSON)을 받지 못했습니다.');
+        }
 
-      // 2. Fetch User Info
-      const userResponse = await axios.get("https://discord.com/api/users/@me", {
-        headers: { Authorization: `Bearer ${access_token}` },
-      });
+        const data = await response.json();
+        const discordTag = data.user.tag;
 
-      const discordUser = userResponse.data;
-      const ip = req.headers["x-forwarded-for"] || req.socket.remoteAddress;
-      const hashedIp = hashId(String(ip));
-      
-      // Match the format used by the Python bot: {guildId}_{userId}
-      const logId = `${state}_${discordUser.id}`;
+        // Add an artificial delay to allow the bot time to assign roles
+        const loadingMessages = [
+          '보안 확인 및 역할 지급 처리 중입니다...',
+          '디스코드 계정 보안 상태를 분석하고 있습니다...',
+          '서버 관리자 설정과 권한을 동기화 중입니다...',
+          '인증 데이터베이스 기록을 최종 검증하고 있습니다...',
+          '유저의 정보를 암호화하고 있습니다...',
+          '서버 역할 레이어 계층 구조를 검토하는 중입니다...',
+          '우회 인증 시도 및 매크로 사용 여부를 체크하고 있습니다...',
+          '다중 계정 접속 기록을 대조 확인하고 있습니다...',
+          '거의 다 되었습니다! 역할 지급 시스템 호출 중...',
+          '마지막으로 지급된 역할의 권한을 확인하고 있습니다...'
+        ];
+        
+        setStatus(loadingMessages[0]);
+        let msgIndex = 1;
+        
+        const messageInterval = setInterval(() => {
+          if (msgIndex < loadingMessages.length) {
+            setStatus(loadingMessages[msgIndex]);
+            msgIndex++;
+          } else {
+            clearInterval(messageInterval);
+          }
+        }, 4500); // Change message every 4.5s
 
-      // 3. Write to Firestore securely on the server
-      const logRef = db.collection("verificationLogs").doc(logId);
-      await logRef.set({
-        id: logId,
-        userId: discordUser.id,
-        discordTag: discordUser.discriminator !== "0" ? `${discordUser.username}#${discordUser.discriminator}` : discordUser.username,
-        username: discordUser.username,
-        discriminator: discordUser.discriminator,
-        guildId: state,
-        hashedIp: hashedIp,
-        verifiedAt: Date.now(),
-        expireAt: Date.now() + 90 * 24 * 60 * 60 * 1000 // 90 days
-      });
+        setTimeout(() => {
+          clearInterval(messageInterval);
+          setStatus(`인증 완료! ${discordTag} 님 환영합니다.`);
+        }, 45000); // Total 45s wait time
 
-      res.json({ 
-        success: true, 
-        user: {
-          id: discordUser.id,
-          username: discordUser.username,
-          tag: `${discordUser.username}#${discordUser.discriminator}`
-        },
-        logId: logId
-      });
+      } catch (e: any) {
+         console.error(e);
+         if (e.code === 'permission-denied') {
+             setError('이 서버는 관리자에 의해 설정되지 않았거나 설정 오류입니다.');
+         } else {
+             setError(e.message || '인증 정보 처리 중 오류가 발생했습니다.');
+         }
+         setStatus('');
+      }
+    };
 
-    } catch (e: any) {
-      console.error("Exchange error:", e.response?.data || e.message);
-      res.status(500).json({ error: e.response?.data || e.message });
-    }
-  });
+    verify();
+  }, [location]);
 
-  app.get("/api/roles/:guildId", async (req, res) => {
-    try {
-      const roles = await getGuildRoles(req.params.guildId);
-      // Filter out @everyone role and managed roles if you want
-      const filteredRoles = Array.isArray(roles) ? roles
-        .filter((r: any) => r.name !== "@everyone" && !r.managed)
-        .map((r: any) => ({
-          id: r.id,
-          name: r.name,
-          color: r.color,
-          position: r.position
-        }))
-        .sort((a: any, b: any) => b.position - a.position) : [];
-      res.json(filteredRoles);
-    } catch (e: any) {
-      console.error("Discord fetching err:", e.message);
-      res.status(400).json({ error: e.message });
-    }
-  });
-  
-  // JSON error handler for non-existent /api routes
-  app.use("/api/*", (req, res) => {
-    res.status(404).json({ error: `API Route ${req.originalUrl} NOT FOUND` });
-  });
-  
-  // Vite middleware for development
-  if (process.env.NODE_ENV !== "production") {
-    const vite = await createViteServer({
-      server: { middlewareMode: true },
-      appType: "spa",
-    });
-    app.use(vite.middlewares);
-  } else {
-    const distPath = path.join(process.cwd(), "dist");
-    app.use(express.static(distPath));
-    app.get("*", (req, res) => {
-      res.sendFile(path.join(distPath, "index.html"));
-    });
-  }
-
-  app.listen(PORT, "0.0.0.0", () => {
-    console.log(`Server running on http://localhost:${PORT}`);
-  });
+  return (
+    <div className="min-h-screen flex items-center justify-center bg-gray-100 font-sans">
+      <div className="bg-white p-8 rounded-xl shadow-lg max-w-md w-full text-center">
+        {error ? (
+          <div>
+            <div className="w-16 h-16 bg-red-100 text-red-600 rounded-full flex items-center justify-center mx-auto mb-4">
+              <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+            </div>
+            <h2 className="text-xl font-bold text-gray-800 mb-2">오류 발생</h2>
+            <p className="text-red-500">{error}</p>
+          </div>
+        ) : (
+          <div>
+            <div className="w-16 h-16 bg-blue-100 text-blue-600 rounded-full flex items-center justify-center mx-auto mb-4 animate-pulse">
+               <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+            </div>
+            <h2 className="text-xl font-bold text-gray-800 mb-2">{status}</h2>
+            {status.includes('완료') ? (
+              <p className="text-green-600 mt-4 text-sm font-medium">이제 이 창을 닫고 디스코드로 돌아가셔도 됩니다!</p>
+            ) : (
+              <p className="text-gray-500 mt-4 text-sm">잠시만 기다려 주세요. 서버 권한을 확인하고 있습니다.</p>
+            )}
+          </div>
+        )}
+      </div>
+    </div>
+  );
 }
-
-startServer();
