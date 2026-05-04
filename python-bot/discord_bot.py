@@ -398,88 +398,189 @@ async def cmd_grant_role(interaction: discord.Interaction, role: discord.Role = 
         db = google_firestore.Client(project=app.project_id, credentials=app.credential.get_credential(), database="ai-studio-dc522c60-c5c4-49c5-9c61-c2d2c3ba7a1b")
         
         # 1. 인증 기록 확인
+        await interaction.response.defer(ephemeral=True) # Defer because Firestore might take time
         log_doc = db.collection('verificationLogs').document(log_id).get()
         if not log_doc.exists:
-            await interaction.response.send_message("❌ 웹사이트 인증 기록이 없습니다. `/인증` 명령어를 통해 먼저 인증해 주세요.", ephemeral=True)
+            # Let's try to list some logs to see if anything exists for this guild
+            some_logs = db.collection('verificationLogs').where('guildId', '==', guild_id).limit(1).get()
+            if not some_logs:
+                await interaction.followup.send("❌ 웹사이트 인증 기록이 없습니다. `/인증` 명령어를 통해 먼저 인증해 주세요.", ephemeral=True)
+            else:
+                await interaction.followup.send(f"❌ {interaction.user.name} 님의 인증 기록을 찾을 수 없습니다. (서버 전체 인증 기록은 있으나 해당 유저 기록 없음)", ephemeral=True)
             return
             
         # 2. 서버 설정에서 역할 ID 목록 확인
         config_doc = db.collection('serverConfigs').document(guild_id).get()
         if not config_doc.exists:
-            await interaction.response.send_message("❌ 이 서버에 대한 설정 내역이 없습니다. 관리자 대시보드에서 설정을 완료해 주세요.", ephemeral=True)
+            await interaction.followup.send("❌ 이 서버에 대한 설정 내역이 대시보드에 없습니다. 관리자가 대시보드에서 설정을 완료해야 합니다.", ephemeral=True)
+            return
+            
+        config_data = config_doc.to_dict()
+        role_ids_str = config_data.get('verifiedRoleIds', [])
+        
+        if not role_ids_str:
+            await interaction.followup.send("⚠️ 대시보드에서 '지급할 역할'이 하나도 설정되지 않았습니다. 관리자가 역할을 선택하고 저장해야 합니다.", ephemeral=True)
+            return
+            
+        # 3. 지급할 역할 필터링
+        allowed_role_ids = [str(rid) for rid in role_ids_str]
+        print(f"DEBUG: Found {len(allowed_role_ids)} allowed roles in config for guild {guild_id}")
+        
+        roles_to_add = []
+        guild_all_roles = interaction.guild.roles
+        
+        if role:
+            if str(role.id) in allowed_role_ids:
+                roles_to_add.append(role)
+            else:
+                await interaction.followup.send(f"❌ `{role.name}` 역할은 관리자가 허용한 '지급 가능 역할'이 아닙니다.", ephemeral=True)
+                return
+        else:
+            # 전체 지급
+            for rid_str in allowed_role_ids:
+                target_role = discord.utils.get(guild_all_roles, id=int(rid_str))
+                if target_role:
+                    roles_to_add.append(target_role)
+                else:
+                    print(f"DEBUG: Role ID {rid_str} not found in guild {guild_id}")
+
+        if not roles_to_add:
+            await interaction.followup.send("❌ 서버에서 지급할 수 있는 유효한 역할을 찾지 못했습니다. 관리자 대시보드에서 역할을 다시 설정하고 서버 역할 동기화를 진행해 주세요.", ephemeral=True)
+            return
+            
+        # 4. 권한 체크 및 부여
+        bot_member = interaction.guild.me
+        if not bot_member:
+            bot_member = await interaction.guild.fetch_member(bot_func.user.id)
+        
+        bot_top_role = bot_member.top_role
+        print(f"DEBUG: Bot top role is {bot_top_role.name} at position {bot_top_role.position}")
+        
+        roles_actually_needed = [r for r in roles_to_add if r not in interaction.user.roles]
+        
+        if not roles_actually_needed:
+            await interaction.followup.send("✅ 이미 필요한 역할이 모두 부여되어 있습니다.", ephemeral=True)
+            return
+
+        unassignable = [r for r in roles_actually_needed if r.position >= bot_top_role.position]
+        if unassignable:
+            names = ", ".join([f"`{r.name}`" for r in unassignable])
+            await interaction.followup.send(f"❌ 봇의 권한보다 높은 위치의 역할은 지급할 수 없습니다: {names}\n디스코드 서버 설정(역할 순서)에서 봇의 순서를 지급할 역할보다 위로 올려주세요.", ephemeral=True)
+            return
+
+        try:
+            await interaction.user.add_roles(*roles_actually_needed)
+            names = ", ".join([f"`{r.name}`" for r in roles_actually_needed])
+            await interaction.followup.send(f"🎉 인증 완료 확인! {names} 역할이 성공적으로 지급되었습니다.", ephemeral=True)
+        except discord.Forbidden:
+            await interaction.followup.send("❌ 서버 권한 문제로 역할을 지급할 수 없습니다. 봇에게 '역할 관리' 권한이 있는지 확인해 주세요.", ephemeral=True)
+        except Exception as e:
+            print(f"ERROR: Role addition failed: {e}")
+            await interaction.followup.send(f"❌ 처리 중 오류 발생: {e}", ephemeral=True)
+            
+    except Exception as e:
+        print(f"역할 지급 중 오류 발생: {e}")
+        await interaction.followup.send("❌ 역할 지급 처리 중 내부 시스템 오류가 발생했습니다.", ephemeral=True)
+
+# --- 자동 역할 지급 시스템 ---
+async def auto_grant_role(guild_id: str, user_id: str):
+    """실시간 리스너로부터 호출되어 인증 완료된 유저에게 역할을 지급합니다."""
+    try:
+        # 봇이 해당 서버에 있는지 확인
+        guild = bot_func.get_guild(int(guild_id))
+        if not guild:
+            # 길드가 캐시에 없으면 fetch 시도
+            try:
+                guild = await bot_func.fetch_guild(int(guild_id))
+            except:
+                return
+
+        # 멤버 정보 가져오기
+        member = guild.get_member(int(user_id))
+        if not member:
+            try:
+                member = await guild.fetch_member(int(user_id))
+            except:
+                return
+
+        app = firebase_admin.get_app()
+        from google.cloud import firestore as google_firestore
+        db = google_firestore.Client(
+            project=app.project_id, 
+            credentials=app.credential.get_credential(), 
+            database="ai-studio-dc522c60-c5c4-49c5-9c61-c2d2c3ba7a1b"
+        )
+        
+        # 1. 서버 설정 확인
+        config_doc = db.collection('serverConfigs').document(guild_id).get()
+        if not config_doc.exists:
             return
             
         config_data = config_doc.to_dict()
         role_ids_str = config_data.get('verifiedRoleIds', [])
         if not role_ids_str:
-            await interaction.response.send_message("❌ 이 서버에는 인증 완료 시 지급될 역할이 설정되어 있지 않습니다. 대시보드에서 역할을 선택해 주세요.", ephemeral=True)
             return
             
-        # 3. 지급할 역할 필터링
-        allowed_role_ids = [str(rid) for rid in role_ids_str]
+        # 2. 지급할 역할 필터링
+        bot_member = guild.me
+        if not bot_member:
+            bot_member = await guild.fetch_member(bot_func.user.id)
+            
+        bot_top_role = bot_member.top_role
         
         roles_to_add = []
-        if role:
-            if str(role.id) in allowed_role_ids:
-                roles_to_add.append(role)
-            else:
-                await interaction.response.send_message(f"❌ `{role.name}` 역할은 지급 가능한 역할 목록에 없습니다. 관리자가 설정한 역할만 지급받을 수 있습니다.", ephemeral=True)
-                return
-        else:
-            # 매개변수가 없으면 설정된 모든 역할을 대상으로 함
-            for role_id_str in allowed_role_ids:
-                try:
-                    r = interaction.guild.get_role(int(role_id_str))
-                    if r:
-                        roles_to_add.append(r)
-                except:
-                    continue
-
-        if not roles_to_add:
-            await interaction.response.send_message("❌ 지급할 수 있는 역할을 찾을 수 없습니다. (역할이 삭제되었거나 설정 오류)", ephemeral=True)
-            return
-            
-        # 4. 역할 부여 (이미 있는 역할 제외)
-        new_roles = [r for r in roles_to_add if r not in interaction.user.roles]
+        for rid_str in role_ids_str:
+            target_role = guild.get_role(int(rid_str))
+            if target_role and target_role not in member.roles:
+                # 봇보다 높은 역할은 지급 불가
+                if target_role.position < bot_top_role.position:
+                    roles_to_add.append(target_role)
         
-        if not new_roles:
-            await interaction.response.send_message("✅ 이미 필요한 역할이 모두 부여되어 있습니다.", ephemeral=True)
-            return
-
-        try:
-            # 봇 자신의 역할 위치 확인을 위해 봇 멤버 정보를 가져옵니다.
-            bot_member = interaction.guild.get_member(bot_func.user.id)
-            if not bot_member:
-                bot_member = await interaction.guild.fetch_member(bot_func.user.id)
-            
-            bot_top_role = bot_member.top_role
-            
-            # 봇보다 높은 역할이 있는지 확인
-            unassignable = [r for r in new_roles if r.position >= bot_top_role.position]
-            if unassignable:
-                unassignable_names = ", ".join([f"`{r.name}`" for r in unassignable])
-                await interaction.response.send_message(f"❌ 봇의 권한이 부족하여 다음 역할을 지급할 수 없습니다: {unassignable_names}\n디스코드 서버 설정에서 봇의 순서를 지급할 역할보다 위로 올려주세요.", ephemeral=True)
-                return
-
-            await interaction.user.add_roles(*new_roles)
-            role_names = ", ".join([f"`{r.name}`" for r in new_roles])
-            await interaction.response.send_message(f"🎉 인증 기록이 확인되어 {role_names} 역할이 성공적으로 지급되었습니다!", ephemeral=True)
-        except discord.Forbidden:
-            await interaction.response.send_message("❌ 역할을 부여할 권한이 없습니다. 봇에게 '역할 관리' 권한이 있는지 확인해 주세요.", ephemeral=True)
-        except Exception as e:
-            await interaction.response.send_message(f"❌ 역할 부여 중 알 수 없는 오류가 발생했습니다: {e}", ephemeral=True)
-            
+        if roles_to_add:
+            await member.add_roles(*roles_to_add)
+            print(f"✨ [자동 역할 지급] {guild.name} 서버: {member.display_name} 님에게 {len(roles_to_add)}개 역할 부여")
+    
     except Exception as e:
-        print(f"역할 지급 중 오류 발생: {e}")
-        await interaction.response.send_message("❌ 역할 지급 처리 중 내부 시스템 오류가 발생했습니다.", ephemeral=True)
+        print(f"⚠️ 자동 역할 지급 중 오류 발생: {e}")
+
+def setup_firestore_listener():
+    """Firestore의 verificationLogs 콜렉션을 감시하여 새로운 인증을 실시간으로 감지합니다."""
+    app = firebase_admin.get_app()
+    from google.cloud import firestore as google_firestore
+    db = google_firestore.Client(
+        project=app.project_id, 
+        credentials=app.credential.get_credential(), 
+        database="ai-studio-dc522c60-c5c4-49c5-9c61-c2d2c3ba7a1b"
+    )
+    
+    def on_snapshot(col_snapshot, changes, read_time):
+        for change in changes:
+            # 문서가 생성(ADDED)되거나 업데이트(MODIFIED)될 때 작동
+            if change.type.name in ['ADDED', 'MODIFIED']:
+                data = change.document.to_dict()
+                guild_id = data.get('guildId')
+                user_id = data.get('userId')
+                if guild_id and user_id:
+                    # 메인 이벤트 루프에서 비동기 함수 실행
+                    bot_func.loop.create_task(auto_grant_role(guild_id, user_id))
+
+    col_query = db.collection('verificationLogs')
+    # 리스너 등록
+    col_query.on_snapshot(on_snapshot)
+    print("📡 Firestore 실시간 인증 모니터링 리스너 가동 중...")
 
 # --- 5. 동시 실행 설정 ---
 async def main():
+    # Firestore 리스너는 봇이 준비된 후(서버 정보를 가져올 수 있을 때) 실행하는 것이 좋으므로
+    # 루프 시작 전 간단히 셋업만 호출 (on_ready에서 호출해도 되지만 여기서 한번 시도)
+    
     # 두 봇을 비동기로 동시에 실행
     tasks = [bot_ai.start(TOKEN_AI)]
     
     if TOKEN_FUNC:
         tasks.append(bot_func.start(TOKEN_FUNC))
+        # 리스너 시작 (콜백 방식이므로 await 하지 않음)
+        setup_firestore_listener()
     else:
         print("⚠️ DISCORD_FUNC_TOKEN이 설정되지 않아 2번 봇(기능형)은 실행하지 않습니다.")
         

@@ -8,33 +8,34 @@ export default function DiscordCallback() {
 
   useEffect(() => {
     const queryParams = new URLSearchParams(location.search);
+    const hashParams = new URLSearchParams(location.hash.substring(1));
+    const oldToken = hashParams.get('access_token');
+    
+    if (oldToken) {
+      setError('보안 정책업데이트로 인해 앱을 다시 시작해 주세요. (기존 세션 만료)');
+      window.history.replaceState({}, document.title, window.location.pathname);
+      return;
+    }
+
     const code = queryParams.get('code');
-    const guildId = queryParams.get('state');
+    const obfuscatedState = queryParams.get('state');
 
-    // Security check: Block legacy implicit grant token format if somehow it still arrives
-    if (location.hash.includes('access_token')) {
-      setError('보안 위험: 구형 인증 방식(Implicit Grant)은 더 이상 지원되지 않습니다. 다시 시도해 주세요.');
-      setStatus('');
+    // Clean URL immediately to hide the code from address bar and history
+    if (code || obfuscatedState) {
       window.history.replaceState({}, document.title, window.location.pathname);
-      return;
     }
 
-    if (!code || !guildId) {
-      if (!location.search && !location.hash) return;
-      setError('잘못된 인증 접근입니다. (code 또는 state 누락)');
+    if (!code || !obfuscatedState) {
+      if (!location.search && !location.hash) return; // Wait for initial load
+      setError('잘못된 인증 접근입니다.');
       setStatus('');
       return;
     }
 
-    // Clean up the URL bar IMMEDIATELY for security. 
-    // We already have the code and guildId in variables.
-    if (window.location.search || window.location.hash) {
-      window.history.replaceState({}, document.title, window.location.pathname);
-    }
+    const guildId = atob(obfuscatedState); // Decode obfuscated Guild ID
 
     const verify = async () => {
       try {
-        console.log("Starting verification for guild:", guildId);
         const response = await fetch('/api/discord/exchange', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -42,14 +43,8 @@ export default function DiscordCallback() {
         });
 
         if (!response.ok) {
-          let errorMsg = '인증 서버 응답 오류';
-          try {
-            const errData = await response.json();
-            errorMsg = errData.error || errorMsg;
-          } catch (e) {
-            if (response.status === 404) errorMsg = '인증 API 경로를 찾을 수 없습니다. (404)';
-          }
-          throw new Error(errorMsg);
+          const errData = await response.json();
+          throw new Error(errData.error || '인증 교환 중 오류가 발생했습니다.');
         }
 
         const data = await response.json();

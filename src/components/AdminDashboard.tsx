@@ -1,13 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { initializeApp } from 'firebase/app';
-import { getAuth, signInWithPopup, GoogleAuthProvider, onAuthStateChanged, User, signOut } from 'firebase/auth';
-import { getFirestore, collection, query, getDocs, doc, setDoc, deleteDoc, where } from 'firebase/firestore';
-import firebaseConfig from '../../firebase-applet-config.json';
-import { handleFirestoreError, OperationType } from '../lib/firebaseUtils';
-
-const app = initializeApp(firebaseConfig);
-const auth = getAuth(app);
-const db = getFirestore(app, firebaseConfig.firestoreDatabaseId);
+import { auth, db, handleFirestoreError, OperationType } from '../lib/firebaseUtils';
+import { collection, query, getDocs, doc, setDoc, deleteDoc, where, updateDoc, getDoc } from 'firebase/firestore';
+import { signInWithPopup, GoogleAuthProvider, onAuthStateChanged, User, signOut } from 'firebase/auth';
 
 function RoleSelector({ serverId, selectedRoleIds, onChange }: { serverId: string, selectedRoleIds: string[], onChange: (roles: string[]) => void }) {
   const [roles, setRoles] = useState<any[]>([]);
@@ -15,24 +9,22 @@ function RoleSelector({ serverId, selectedRoleIds, onChange }: { serverId: strin
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    import('firebase/firestore').then(({ doc, getDoc }) => {
-      const roleDocRef = doc(db, 'serverRoles', serverId);
-      getDoc(roleDocRef)
-        .then(roleDoc => {
-          if (roleDoc.exists()) {
-            setRoles(roleDoc.data().roles || []);
-          } else {
-            console.log("No roles found in Firebase. Please run /역할동기화 in your Discord server.");
-            setError("이 서버의 역할 정보가 없습니다. 디스코드에서 봇의 '/역할동기화' 명령어를 실행한 후 새로고침해주세요.");
-          }
-          setLoading(false);
-        })
-        .catch(e => {
-          console.error(e);
-          setError(e.message);
-          setLoading(false);
-        });
-    });
+    const fetchRoles = async () => {
+      try {
+        const roleDocRef = doc(db, 'serverRoles', serverId);
+        const roleDoc = await getDoc(roleDocRef);
+        if (roleDoc.exists()) {
+          setRoles(roleDoc.data().roles || []);
+        } else {
+          setError("이 서버의 역할 정보가 없습니다. 디스코드에서 봇의 '/역할동기화' 명령어를 실행한 후 새로고침해주세요.");
+        }
+      } catch (e: any) {
+        setError(e.message);
+      } finally {
+        setLoading(false);
+      }
+    };
+    fetchRoles();
   }, [serverId]);
 
   if (loading) return <div className="text-xs text-gray-500">역할을 불러오는 중...</div>;
@@ -90,10 +82,8 @@ export default function AdminDashboard() {
             await setDoc(ref, {
               adminUid: u.uid,
               guildId: setupGuildId,
-              createdAt: Date.now(),
-              updatedAt: Date.now(),
-              verifiedRoleIds: []
-            });
+              updatedAt: Date.now()
+            }, { merge: true });
             window.history.replaceState({}, document.title, "/");
             await loadData(u.uid); // Ensure data is loaded immediately
           } catch (e: any) {
@@ -113,22 +103,10 @@ export default function AdminDashboard() {
 
   const loadData = async (uid: string) => {
     try {
-      const { where } = await import('firebase/firestore');
       const qSecure = query(collection(db, 'serverConfigs'), where('adminUid', '==', uid));
       const snap = await getDocs(qSecure);
       const data = snap.docs.map(d => ({ id: d.id, ...d.data() }));
       setServers(data);
-
-      // In a real scenario with lots of data, use pagination, but for now we fetch all since it's a demo
-      if (data.length > 0) {
-        // You cannot query logs easily across multiple unstructured guildIds unless you use `in`, and `in` has a max 10.
-        // Let's just fetch them individually or use the front-end to filter if it's small, but we MUST secure the query!
-        // Wait, our rules for verificationLogs: 
-        // allow read: if isSignedIn() && get(/databases/$(database)/documents/serverConfigs/$(resource.data.guildId)).data.adminUid == request.auth.uid;
-        // This is a Relational Read. Doing getDocs() on the whole collection fails unless the client explicitly queries for specific records that meet the rule, OR if we structure the query.
-        // Actually, since relational rules using `get()` on resources don't scale with top-level collection list queries (because Firestore can't evaluate `get()` during large lists without querying every doc), this generic getDocs() might fail. 
-        // We will fetch it from an API endpoint on the backend instead, since the backend has admin SDK and can safely query.
-      }
     } catch (e) {
       handleFirestoreError(e, OperationType.LIST, 'serverConfigs');
     }
@@ -188,10 +166,8 @@ export default function AdminDashboard() {
       await setDoc(ref, {
         adminUid: user.uid,
         guildId: newGuildId,
-        createdAt: Date.now(),
-        updatedAt: Date.now(),
-        verifiedRoleIds: []
-      });
+        updatedAt: Date.now()
+      }, { merge: true });
       setNewGuildId('');
       loadData(user.uid);
     } catch (e: any) {
@@ -275,7 +251,6 @@ export default function AdminDashboard() {
                           ));
                           
                           try {
-                            const { updateDoc, doc } = await import('firebase/firestore');
                             await updateDoc(doc(db, 'serverConfigs', s.id), { 
                               verifiedRoleIds: newRoleIds,
                               updatedAt: Date.now()

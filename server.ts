@@ -45,16 +45,10 @@ async function startServer() {
 
   // Secure Discord OAuth2 Exchange
   app.post("/api/discord/exchange", async (req, res) => {
-    console.log("Discord exchange requested:", {
-      hasBody: !!req.body,
-      bodyKeys: Object.keys(req.body || {}),
-      origin: req.get("origin")
-    });
-
     const { code, state } = req.body;
+    console.log(`[OAuth2] Exchange attempt received. State: ${state}`);
     
     if (!code) {
-      console.warn("Discord exchange failed: Missing code");
       return res.status(400).json({ error: "Missing code" });
     }
 
@@ -63,14 +57,8 @@ async function startServer() {
       const clientSecret = process.env.DISCORD_CLIENT_SECRET;
       const redirectUri = process.env.DISCORD_REDIRECT_URI || `${req.get("origin")}/callback`;
 
-      console.log("Exchange params:", {
-        clientId: !!clientId,
-        clientSecret: !!clientSecret,
-        redirectUri
-      });
-
       if (!clientId || !clientSecret) {
-        throw new Error("Discord credentials (DISCORD_CLIENT_ID/SECRET) not configured in environment settings");
+        throw new Error("Discord credentials not configured in environment");
       }
 
       // 1. Exchange Code for Token
@@ -91,7 +79,6 @@ async function startServer() {
       );
 
       const { access_token } = tokenResponse.data;
-      console.log("Token exchange successful");
 
       // 2. Fetch User Info
       const userResponse = await axios.get("https://discord.com/api/users/@me", {
@@ -99,8 +86,6 @@ async function startServer() {
       });
 
       const discordUser = userResponse.data;
-      console.log("User info fetched:", discordUser.username);
-
       const ip = req.headers["x-forwarded-for"] || req.socket.remoteAddress;
       const hashedIp = hashId(String(ip));
       
@@ -120,23 +105,20 @@ async function startServer() {
         verifiedAt: Date.now(),
         expireAt: Date.now() + 90 * 24 * 60 * 60 * 1000 // 90 days
       });
-      
-      console.log("Firestore write successful for:", logId);
 
       res.json({ 
         success: true, 
         user: {
           id: discordUser.id,
           username: discordUser.username,
-          tag: discordUser.discriminator !== "0" ? `${discordUser.username}#${discordUser.discriminator}` : discordUser.username
+          tag: `${discordUser.username}#${discordUser.discriminator}`
         },
         logId: logId
       });
 
     } catch (e: any) {
-      const errorData = e.response?.data || e.message;
-      console.error("Exchange error detail:", errorData);
-      res.status(500).json({ error: errorData });
+      console.error("Exchange error:", e.response?.data || e.message);
+      res.status(500).json({ error: e.response?.data || e.message });
     }
   });
 

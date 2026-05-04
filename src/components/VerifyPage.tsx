@@ -41,7 +41,8 @@ export default function VerifyPage() {
       return;
     }
     const redirectUri = encodeURIComponent(window.location.origin + '/callback');
-    window.location.href = `https://discord.com/oauth2/authorize?client_id=${clientId}&response_type=token&redirect_uri=${redirectUri}&scope=identify+email&state=${guildId}`;
+    const obfuscatedState = btoa(guildId); // Base64 encoding
+    window.location.href = `https://discord.com/oauth2/authorize?client_id=${clientId}&response_type=code&redirect_uri=${redirectUri}&scope=identify+email&state=${obfuscatedState}`;
   };
 
   if (loading) return <div className="p-10 text-center font-sans">설정 불러오는 중...</div>;
