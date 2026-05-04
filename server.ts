@@ -38,22 +38,25 @@ async function startServer() {
   app.use(cors());
   app.use(express.json());
 
-  // API routes
-  const apiRouter = express.Router();
+  // request logger
+  app.use((req, res, next) => {
+    console.log(`[Server] ${req.method} ${req.url}`);
+    next();
+  });
 
-  apiRouter.get("/health", (req, res) => {
+  // API routes
+  app.get("/api/health", (req, res) => {
     res.json({ status: "ok" });
   });
 
   // Secure Discord OAuth2 Exchange
-  apiRouter.get("/discord/exchange", (req, res) => {
+  app.get("/api/discord/exchange", (req, res) => {
     res.status(405).json({ error: "Method Not Allowed. Please use POST for token exchange." });
   });
 
-  apiRouter.post("/discord/exchange", async (req, res) => {
+  app.post("/api/discord/exchange", async (req, res) => {
     const { code, state } = req.body;
-    console.log(`[OAuth2] Received Request - Path: ${req.originalUrl}, Method: ${req.method}`);
-    console.log(`[OAuth2] Exchange attempt. State: ${state}`);
+    console.log(`[OAuth2] Exchange attempt. State: ${state}, Code present: ${!!code}`);
     
     if (!code) {
       console.error("[OAuth2] Missing code in request body");
@@ -66,6 +69,7 @@ async function startServer() {
       const redirectUri = process.env.DISCORD_REDIRECT_URI || `${req.get("origin")}/callback`;
 
       if (!clientId || !clientSecret) {
+        console.error("[OAuth2] Environment variables DISCORD_CLIENT_ID or DISCORD_CLIENT_SECRET are missing");
         throw new Error("Discord credentials not configured in environment");
       }
 
@@ -132,7 +136,7 @@ async function startServer() {
     }
   });
 
-  apiRouter.get("/roles/:guildId", async (req, res) => {
+  app.get("/api/roles/:guildId", async (req, res) => {
     try {
       const roles = await getGuildRoles(req.params.guildId);
       const filteredRoles = Array.isArray(roles) ? roles
@@ -150,9 +154,6 @@ async function startServer() {
       res.status(400).json({ error: e.message });
     }
   });
-
-  // Mount API Router
-  app.use("/api", apiRouter);
 
   // JSON error handler for non-existent /api routes
   app.all("/api/*", (req, res) => {
