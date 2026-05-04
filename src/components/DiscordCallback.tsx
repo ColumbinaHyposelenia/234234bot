@@ -76,7 +76,7 @@ export default function DiscordCallback() {
         
         setTimeout(() => {
           setStatus(`인증 완료! ${discordTag} 님 환영합니다.`);
-        }, 5000);
+        }, 20000);
 
       } catch (e: any) {
          console.error(e);
