@@ -39,16 +39,24 @@ async function startServer() {
   app.use(express.json());
 
   // API routes
-  app.get("/api/health", (req, res) => {
+  const apiRouter = express.Router();
+
+  apiRouter.get("/health", (req, res) => {
     res.json({ status: "ok" });
   });
 
   // Secure Discord OAuth2 Exchange
-  app.post("/api/discord/exchange", async (req, res) => {
+  apiRouter.get("/discord/exchange", (req, res) => {
+    res.status(405).json({ error: "Method Not Allowed. Please use POST for token exchange." });
+  });
+
+  apiRouter.post("/discord/exchange", async (req, res) => {
     const { code, state } = req.body;
-    console.log(`[OAuth2] Exchange attempt received. State: ${state}`);
+    console.log(`[OAuth2] Received Request - Path: ${req.originalUrl}, Method: ${req.method}`);
+    console.log(`[OAuth2] Exchange attempt. State: ${state}`);
     
     if (!code) {
+      console.error("[OAuth2] Missing code in request body");
       return res.status(400).json({ error: "Missing code" });
     }
 
@@ -62,6 +70,7 @@ async function startServer() {
       }
 
       // 1. Exchange Code for Token
+      console.log("[OAuth2] Exchanging code for token...");
       const tokenResponse = await axios.post(
         "https://discord.com/api/oauth2/token",
         new URLSearchParams({
@@ -72,15 +81,14 @@ async function startServer() {
           redirect_uri: redirectUri,
         }).toString(),
         {
-          headers: {
-            "Content-Type": "application/x-www-form-urlencoded",
-          },
+          headers: { "Content-Type": "application/x-www-form-urlencoded" },
         }
       );
 
       const { access_token } = tokenResponse.data;
 
       // 2. Fetch User Info
+      console.log("[OAuth2] Fetching user info from Discord...");
       const userResponse = await axios.get("https://discord.com/api/users/@me", {
         headers: { Authorization: `Bearer ${access_token}` },
       });
@@ -89,10 +97,10 @@ async function startServer() {
       const ip = req.headers["x-forwarded-for"] || req.socket.remoteAddress;
       const hashedIp = hashId(String(ip));
       
-      // Match the format used by the Python bot: {guildId}_{userId}
       const logId = `${state}_${discordUser.id}`;
 
       // 3. Write to Firestore securely on the server
+      console.log(`[Firestore] Writing log for user: ${discordUser.username} (${logId})`);
       const logRef = db.collection("verificationLogs").doc(logId);
       await logRef.set({
         id: logId,
@@ -103,29 +111,30 @@ async function startServer() {
         guildId: state,
         hashedIp: hashedIp,
         verifiedAt: Date.now(),
-        expireAt: Date.now() + 90 * 24 * 60 * 60 * 1000 // 90 days
+        expireAt: Date.now() + 90 * 24 * 60 * 60 * 1000
       });
 
+      console.log("[OAuth2] Exchange successful!");
       res.json({ 
         success: true, 
         user: {
           id: discordUser.id,
           username: discordUser.username,
-          tag: `${discordUser.username}#${discordUser.discriminator}`
+          tag: discordUser.discriminator !== "0" ? `${discordUser.username}#${discordUser.discriminator}` : discordUser.username
         },
         logId: logId
       });
 
     } catch (e: any) {
-      console.error("Exchange error:", e.response?.data || e.message);
-      res.status(500).json({ error: e.response?.data || e.message });
+      const errorData = e.response?.data || e.message;
+      console.error("[OAuth2] Exchange error details:", JSON.stringify(errorData));
+      res.status(500).json({ error: errorData });
     }
   });
 
-  app.get("/api/roles/:guildId", async (req, res) => {
+  apiRouter.get("/roles/:guildId", async (req, res) => {
     try {
       const roles = await getGuildRoles(req.params.guildId);
-      // Filter out @everyone role and managed roles if you want
       const filteredRoles = Array.isArray(roles) ? roles
         .filter((r: any) => r.name !== "@everyone" && !r.managed)
         .map((r: any) => ({
@@ -141,10 +150,14 @@ async function startServer() {
       res.status(400).json({ error: e.message });
     }
   });
-  
+
+  // Mount API Router
+  app.use("/api", apiRouter);
+
   // JSON error handler for non-existent /api routes
-  app.use("/api/*", (req, res) => {
-    res.status(404).json({ error: `API Route ${req.originalUrl} NOT FOUND` });
+  app.all("/api/*", (req, res) => {
+    console.warn(`[Route Not Found] ${req.method} ${req.originalUrl}`);
+    res.status(404).json({ error: `API Route ${req.originalUrl} NOT FOUND with method ${req.method}` });
   });
   
   // Vite middleware for development
