@@ -72,11 +72,30 @@ export default function DiscordCallback() {
         });
 
         // Add an artificial delay to allow the bot time to assign roles
-        setStatus('보안 확인 및 역할 지급 처리 중입니다...');
+        const loadingMessages = [
+          '보안 확인 및 역할 지급 처리 중입니다...',
+          '디스코드 계정 보안 상태를 분석하고 있습니다...',
+          '서버 관리자 설정과 권한을 동기화 중입니다...',
+          '인증 데이터베이스 기록을 최종 검증하고 있습니다...',
+          '거의 다 되었습니다! 역할 지급 시스템 호출 중...'
+        ];
         
+        setStatus(loadingMessages[0]);
+        let msgIndex = 1;
+        
+        const messageInterval = setInterval(() => {
+          if (msgIndex < loadingMessages.length) {
+            setStatus(loadingMessages[msgIndex]);
+            msgIndex++;
+          } else {
+            clearInterval(messageInterval);
+          }
+        }, 8000); // Change message every 8s
+
         setTimeout(() => {
+          clearInterval(messageInterval);
           setStatus(`인증 완료! ${discordTag} 님 환영합니다.`);
-        }, 20000);
+        }, 40000); // Total 40s wait time
 
       } catch (e: any) {
          console.error(e);
