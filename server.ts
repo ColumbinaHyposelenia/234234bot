@@ -141,7 +141,12 @@ async function startServer() {
       res.status(400).json({ error: e.message });
     }
   });
-
+  
+  // JSON error handler for non-existent /api routes
+  app.use("/api/*", (req, res) => {
+    res.status(404).json({ error: `API Route ${req.originalUrl} NOT FOUND` });
+  });
+  
   // Vite middleware for development
   if (process.env.NODE_ENV !== "production") {
     const vite = await createViteServer({
