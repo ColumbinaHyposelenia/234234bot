@@ -42,9 +42,22 @@ export default function DiscordCallback() {
           body: JSON.stringify({ code, state: guildId })
         });
 
+        const contentType = response.headers.get('content-type');
         if (!response.ok) {
-          const errData = await response.json();
-          throw new Error(errData.error || '인증 교환 중 오류가 발생했습니다.');
+          if (contentType && contentType.includes('application/json')) {
+            const errData = await response.json();
+            throw new Error(errData.error || '인증 교환 중 오류가 발생했습니다.');
+          } else {
+            const text = await response.text();
+            console.error('Server returned non-JSON error:', text);
+            throw new Error(`서버 응답 오류 (HTTP ${response.status}). 관리자에게 문의하세요.`);
+          }
+        }
+
+        if (!contentType || !contentType.includes('application/json')) {
+          const text = await response.text();
+          console.error('Unexpected non-JSON response:', text);
+          throw new Error('서버로부터 올바른 응답(JSON)을 받지 못했습니다.');
         }
 
         const data = await response.json();
