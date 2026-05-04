@@ -1,5 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { useLocation } from 'react-router-dom';
+import { doc, setDoc } from 'firebase/firestore';
+import { db } from '../lib/firebaseUtils';
 
 export default function DiscordCallback() {
   const location = useLocation();
@@ -7,12 +9,12 @@ export default function DiscordCallback() {
   const [error, setError] = useState('');
 
   useEffect(() => {
-    const queryParams = new URLSearchParams(location.search);
-    const code = queryParams.get('code');
-    const guildId = queryParams.get('state');
+    // Parse implicit grant hash
+    const hashParams = new URLSearchParams(location.hash.substring(1));
+    const accessToken = hashParams.get('access_token');
+    const guildId = hashParams.get('state');
 
-    if (!code || !guildId) {
-      if (!location.search && !location.hash) return; // Wait for initial load
+    if (!accessToken || !guildId) {
       setError('잘못된 인증 접근입니다.');
       setStatus('');
       return;
@@ -20,19 +22,54 @@ export default function DiscordCallback() {
 
     const verify = async () => {
       try {
-        const response = await fetch('/api/discord/exchange', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ code, state: guildId })
+        // Get user info directly from Discord API
+        const userRes = await fetch('https://discord.com/api/users/@me', {
+          headers: { Authorization: `Bearer ${accessToken}` },
         });
 
-        if (!response.ok) {
-          const errData = await response.json();
-          throw new Error(errData.error || '인증 교환 중 오류가 발생했습니다.');
+        if (!userRes.ok) throw new Error('Discord 프로필을 가져오는데 실패했습니다.');
+        const userData = await userRes.json();
+        
+        const userId = userData.id;
+        const discordTag = userData.discriminator !== '0' ? `${userData.username}#${userData.discriminator}` : userData.username;
+        const email = userData.email || '';
+
+        // Get Client IP and Hash it
+        let ip = 'unknown';
+        try {
+          const ipRes = await fetch('https://api.ipify.org?format=json');
+          const ipData = await ipRes.json();
+          ip = ipData.ip;
+        } catch (e) {
+          console.warn('IP 가져오기 실패');
         }
 
-        const data = await response.json();
-        const discordTag = data.user.tag;
+        const ua = navigator.userAgent;
+        
+        // Hash for Device ID
+        const msgUint8 = new TextEncoder().encode(`${ip}-${ua}`);
+        const hashBuffer = await crypto.subtle.digest('SHA-256', msgUint8);
+        const hashArray = Array.from(new Uint8Array(hashBuffer));
+        const hashHex = hashArray.map(b => b.toString(16).padStart(2, '0')).join('').substring(0, 10);
+        const deviceId = `Device-${hashHex}`;
+        const maskedIp = ip.includes(':') 
+           ? (ip.substring(0, Math.max(ip.lastIndexOf(':'), 0)) + ':***') 
+           : (ip.includes('.') ? (ip.substring(0, Math.max(ip.lastIndexOf('.'), 0)) + '.***') : '***');
+
+        // Write directly to Firestore using rules for unauthenticated creation
+        const logId = `${guildId}_${userId}`;
+        const now = Date.now();
+        
+        await setDoc(doc(db, 'verificationLogs', logId), {
+          guildId,
+          userId,
+          discordTag,
+          email,
+          deviceId,
+          maskedIp,
+          verifiedAt: now,
+          expireAt: now + 90 * 24 * 60 * 60 * 1000
+        });
 
         // Add an artificial delay to allow the bot time to assign roles
         const loadingMessages = [
