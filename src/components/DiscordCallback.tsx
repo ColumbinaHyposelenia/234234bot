@@ -11,27 +11,30 @@ export default function DiscordCallback() {
     const code = queryParams.get('code');
     const guildId = queryParams.get('state');
 
-    // Security check: Block legacy implicit grant token format
+    // Security check: Block legacy implicit grant token format if somehow it still arrives
     if (location.hash.includes('access_token')) {
       setError('보안 위험: 구형 인증 방식(Implicit Grant)은 더 이상 지원되지 않습니다. 다시 시도해 주세요.');
       setStatus('');
-      // Immediately clear the hash from the URL
       window.history.replaceState({}, document.title, window.location.pathname);
       return;
     }
 
     if (!code || !guildId) {
       if (!location.search && !location.hash) return;
-      setError('잘못된 인증 접근입니다.');
+      setError('잘못된 인증 접근입니다. (code 또는 state 누락)');
       setStatus('');
       return;
     }
 
-    // Clean up the URL bar immediately for security and aesthetics
-    window.history.replaceState({}, document.title, window.location.pathname);
+    // Clean up the URL bar IMMEDIATELY for security. 
+    // We already have the code and guildId in variables.
+    if (window.location.search || window.location.hash) {
+      window.history.replaceState({}, document.title, window.location.pathname);
+    }
 
     const verify = async () => {
       try {
+        console.log("Starting verification for guild:", guildId);
         const response = await fetch('/api/discord/exchange', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -39,8 +42,14 @@ export default function DiscordCallback() {
         });
 
         if (!response.ok) {
-          const errData = await response.json();
-          throw new Error(errData.error || '인증 교환 중 오류가 발생했습니다.');
+          let errorMsg = '인증 서버 응답 오류';
+          try {
+            const errData = await response.json();
+            errorMsg = errData.error || errorMsg;
+          } catch (e) {
+            if (response.status === 404) errorMsg = '인증 API 경로를 찾을 수 없습니다. (404)';
+          }
+          throw new Error(errorMsg);
         }
 
         const data = await response.json();
