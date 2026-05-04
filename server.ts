@@ -10,16 +10,14 @@ import crypto from "crypto";
 import { initializeApp, cert, getApp, getApps } from "firebase-admin/app";
 import { getFirestore } from "firebase-admin/firestore";
 
-// Initialize Firebase Admin
-import fs from "fs";
-const firebaseConfig = JSON.parse(fs.readFileSync("./firebase-applet-config.json", "utf-8"));
-
+// Initialize Firebase Admin (using default credentials or config if needed)
+// In AI Studio, we can often rely on default if provisioned, but we might need service account for full local control.
+// However, the user is using the standard SDK for now. Let's keep it simple and use regular 'firebase' SDK on server if possible, 
+// but 'firebase-admin' is standard for server-side.
 if (!getApps().length) {
-  initializeApp({
-    projectId: firebaseConfig.projectId,
-  });
+  initializeApp();
 }
-const db = getFirestore(firebaseConfig.firestoreDatabaseId);
+const db = getFirestore();
 
 function hashId(id: string) {
   return crypto.createHash("sha256").update(id).digest("hex");
@@ -46,7 +44,6 @@ async function startServer() {
   // Secure Discord OAuth2 Exchange
   app.post("/api/discord/exchange", async (req, res) => {
     const { code, state } = req.body;
-    console.log(`[OAuth2] Exchange attempt received. State: ${state}`);
     
     if (!code) {
       return res.status(400).json({ error: "Missing code" });
@@ -88,16 +85,13 @@ async function startServer() {
       const discordUser = userResponse.data;
       const ip = req.headers["x-forwarded-for"] || req.socket.remoteAddress;
       const hashedIp = hashId(String(ip));
-      
-      // Match the format used by the Python bot: {guildId}_{userId}
-      const logId = `${state}_${discordUser.id}`;
+      const logId = hashId(`${discordUser.id}-${state}`); // state is guildId in our implementation
 
       // 3. Write to Firestore securely on the server
       const logRef = db.collection("verificationLogs").doc(logId);
       await logRef.set({
         id: logId,
         userId: discordUser.id,
-        discordTag: discordUser.discriminator !== "0" ? `${discordUser.username}#${discordUser.discriminator}` : discordUser.username,
         username: discordUser.username,
         discriminator: discordUser.discriminator,
         guildId: state,

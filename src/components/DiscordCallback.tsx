@@ -8,31 +8,15 @@ export default function DiscordCallback() {
 
   useEffect(() => {
     const queryParams = new URLSearchParams(location.search);
-    const hashParams = new URLSearchParams(location.hash.substring(1));
-    const oldToken = hashParams.get('access_token');
-    
-    if (oldToken) {
-      setError('보안 정책업데이트로 인해 앱을 다시 시작해 주세요. (기존 세션 만료)');
-      window.history.replaceState({}, document.title, window.location.pathname);
-      return;
-    }
-
     const code = queryParams.get('code');
-    const obfuscatedState = queryParams.get('state');
+    const guildId = queryParams.get('state');
 
-    // Clean URL immediately to hide the code from address bar and history
-    if (code || obfuscatedState) {
-      window.history.replaceState({}, document.title, window.location.pathname);
-    }
-
-    if (!code || !obfuscatedState) {
+    if (!code || !guildId) {
       if (!location.search && !location.hash) return; // Wait for initial load
       setError('잘못된 인증 접근입니다.');
       setStatus('');
       return;
     }
-
-    const guildId = atob(obfuscatedState); // Decode obfuscated Guild ID
 
     const verify = async () => {
       try {
