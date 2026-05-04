@@ -13,6 +13,7 @@
     "@google/genai": "^1.29.0",
     "@tailwindcss/vite": "^4.1.14",
     "@vitejs/plugin-react": "^5.0.4",
+    "axios": "^1.16.0",
     "cors": "^2.8.6",
     "discord.js": "^14.26.4",
     "dotenv": "^17.2.3",
