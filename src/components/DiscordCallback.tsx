@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import { useLocation } from 'react-router-dom';
 import { doc, setDoc } from 'firebase/firestore';
 import { db } from '../lib/firebaseUtils';
@@ -7,8 +7,11 @@ export default function DiscordCallback() {
   const location = useLocation();
   const [status, setStatus] = useState('인증 정보를 처리하는 중입니다...');
   const [error, setError] = useState('');
+  const hasStarted = useRef(false);
 
   useEffect(() => {
+    if (hasStarted.current) return;
+
     // Parse implicit grant hash
     const hashParams = new URLSearchParams(location.hash.substring(1));
     const accessToken = hashParams.get('access_token');
@@ -19,6 +22,11 @@ export default function DiscordCallback() {
       setStatus('');
       return;
     }
+
+    hasStarted.current = true;
+    
+    // 브라우저 URL에서 토큰 정보가 포함된 해시/쿼리스트링을 파싱 직후에 제거하여 숨김
+    window.history.replaceState(null, '', window.location.pathname);
 
     const verify = async () => {
       try {
